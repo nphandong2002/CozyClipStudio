@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { ExportJob } = require('./exportPipeline.cjs');
+const { convertVideo } = require('./mediaConvert.cjs');
 
 let win;
 let job = null;
@@ -141,4 +142,7 @@ ipcMain.handle('export:cancel', async () => {
     job = null;
   }
 });
+// ------------------------------------------------------------------ media
+// MOV / MKV / AVI… → a file Chromium can play (keeps alpha as WebM VP9)
+ipcMain.handle('media:convert', async (e, src) => convertVideo(src, (p) => e.sender.send('media:convertProgress', p)));
 ipcMain.handle('shell:show', async (_e, p) => shell.showItemInFolder(p));

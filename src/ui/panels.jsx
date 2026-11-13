@@ -7,7 +7,24 @@ import { windowPoints } from '../engine/scene.js';
 import { useAudition } from './useAudioPreview.js';
 import { setImageSrc, detectKeyBackground, getVideoElement, getMediaDuration, CHROMA_DEFAULTS, LUMA_DEFAULTS, keyModeOf, trimRange } from '../engine/images.js';
 
-const VIDEO_ERR = 'Không đọc được video (định dạng/codec không hỗ trợ). Hãy dùng MP4 (H.264) hoặc WebM.';
+const VIDEO_ERR = 'Không đọc được video (định dạng/codec không hỗ trợ). Hãy dùng MP4 (H.264), WebM hoặc MOV.';
+const MEDIA_ACCEPT = 'image/*,video/*,.mov,.qt,.mkv,.avi,.m4v,.wmv';
+const VIDEO_EXT = /\.(mov|qt|mp4|m4v|webm|mkv|avi|ogv|wmv|flv|mts|m2ts|3gp|mpe?g)$/i;
+// containers/codecs Chromium usually can't play (MOV is often ProRes with transparency)
+const CONVERT_EXT = /\.(mov|qt|mkv|avi|wmv|flv|mts|m2ts|3gp|mpe?g)$/i;
+const isVideoFile = (f) => (f.type || '').startsWith('video') || VIDEO_EXT.test(f.name || '');
+const canConvert = () => typeof window !== 'undefined' && !!window.api?.convertVideo;
+
+/** Convert a video with the bundled ffmpeg (Electron only) into a playable MP4 / WebM (alpha kept). */
+async function convertVideoFile(file, onStage) {
+  const label = 'Đang chuyển đổi video ' + ((/\.(\w+)$/.exec(file.name || '') || [])[1] || '').toUpperCase();
+  onStage({ label: label.trim(), progress: 0 });
+  const r = await window.api.convertVideo(file, (p) => onStage({ label: label.trim(), progress: p }));
+  const name = (file.name || 'video').replace(/\.[^.]+$/, '') + '.' + r.ext;
+  const out = new File([r.bytes], name, { type: r.mime });
+  out.converted = r; // { alpha, mode }
+  return out;
+}
 
 /** Read a File as a data URL, reporting progress 0..1. */
 function readAsDataURL(file, onProgress = () => {}) {
@@ -79,23 +96,36 @@ function probeImage(dataURL) {
  * onStage({ label, progress }) along the way. Resolves to the prop params to store.
  */
 async function loadMediaFile(file, key, onStage) {
-  const type = file.type || '';
-  const isVideo = type.startsWith('video');
-  const mediaType = isVideo ? 'video' : type === 'image/gif' ? 'gif' : 'image';
-  onStage({ label: 'Đang đọc file', progress: 0 });
-  const dataURL = await readAsDataURL(file, (f) => onStage({ label: 'Đang đọc file', progress: f * 0.7 }));
-  onStage({ label: isVideo ? 'Đang phân tích video' : 'Đang phân tích ảnh', progress: 0.75 });
+  const isVideo = isVideoFile(file);
+  const mediaType = isVideo ? 'video' : file.type === 'image/gif' ? 'gif' : 'image';
   const extra = {};
   let aspect;
+  let info = null;
   if (isVideo) {
-    const info = await probeVideo(file);
+    // MOV/MKV/AVI… → convert first; anything else that fails to play gets converted as a fallback
+    if (canConvert() && CONVERT_EXT.test(file.name || '')) file = await convertVideoFile(file, onStage);
+    onStage({ label: 'Đang phân tích video', progress: 0.02 });
+    try {
+      info = await probeVideo(file);
+    } catch (e) {
+      if (!canConvert() || file.converted) throw e;
+      file = await convertVideoFile(file, onStage);
+      info = await probeVideo(file);
+    }
+  }
+  onStage({ label: 'Đang đọc file', progress: 0.05 });
+  const dataURL = await readAsDataURL(file, (f) => onStage({ label: 'Đang đọc file', progress: 0.05 + f * 0.7 }));
+  onStage({ label: isVideo ? 'Đang phân tích video' : 'Đang phân tích ảnh', progress: 0.8 });
+  if (isVideo) {
     aspect = info.aspect;
+    // a video that already has transparency needs no background removal
+    const kind = file.converted?.alpha && info.bg.kind !== 'green' ? 'transparent' : info.bg.kind;
     Object.assign(extra, {
       duration: info.duration,
       trimStart: 0,
       trimEnd: null,
-      keyMode: info.bg.kind || 'none',
-      bgDetected: info.bg.kind || 'none',
+      keyMode: kind === 'green' || kind === 'black' ? kind : 'none',
+      bgDetected: kind || 'none',
       ...CHROMA_DEFAULTS,
       ...LUMA_DEFAULTS,
       keyColor: info.bg.kind === 'green' ? info.bg.color : CHROMA_DEFAULTS.keyColor,
@@ -423,8 +453,8 @@ export function PropsPanel({ project, update, selection, setSelection }) {
       });
   };
   const addMedia = () =>
-    pickFile('image/*,video/*', (f) => {
-      const kind = (f.type || '').startsWith('video') ? 'vid' : f.type === 'image/gif' ? 'gif' : 'img';
+    pickFile(MEDIA_ACCEPT, (f) => {
+      const kind = isVideoFile(f) ? 'vid' : f.type === 'image/gif' ? 'gif' : 'img';
       const id = uid(kind);
       runUpload(f, 'prop:' + id, ({ src, mediaType, aspect, extra }) => {
         const natH = 360;
@@ -437,7 +467,7 @@ export function PropsPanel({ project, update, selection, setSelection }) {
   const changeMedia = () => {
     const id = sel.id;
     const old = sel.params || {};
-    pickFile('image/*,video/*', (f) =>
+    pickFile(MEDIA_ACCEPT, (f) =>
       runUpload(f, 'prop:' + id, ({ src, mediaType, aspect, extra }) =>
         update((p) => {
           const o = p.props.find((x) => x.id === id);
@@ -476,7 +506,7 @@ export function PropsPanel({ project, update, selection, setSelection }) {
         options={[['', '+ Chọn loại vật thể…'], ...Object.entries(PROPS).filter(([k]) => k !== 'image').map(([k, d]) => [k, d.label + (d.sound ? ' 🔊' : '')])]}
         onChange={add}
       />
-      <button onClick={addMedia} disabled={busy}>⬆ Tải ảnh / GIF / video làm vật thể</button>
+      <button onClick={addMedia} disabled={busy} title="Ảnh, GIF, MP4, WebM, MOV (kể cả MOV nền trong suốt)…">⬆ Tải ảnh / GIF / video làm vật thể</button>
       <UploadStatus state={upload} onClose={() => setUpload(null)} />
       <h3>Danh sách (thứ tự vẽ: trên → dưới)</h3>
       <ul className="list">
@@ -610,11 +640,12 @@ function VideoMediaEditor({ sel, setParams, dur, loopSeconds }) {
     const v = getVideoElement(key);
     if (!v) return;
     const r = detectKeyBackground(v, v.videoWidth, v.videoHeight);
-    setParams({ keyMode: r.kind || 'none', bgDetected: r.kind || 'none', chromaKey: false, ...(r.kind === 'green' ? { keyColor: r.color } : {}) });
+    const mode = r.kind === 'green' || r.kind === 'black' ? r.kind : 'none';
+    setParams({ keyMode: mode, bgDetected: r.kind || 'none', chromaKey: false, ...(r.kind === 'green' ? { keyColor: r.color } : {}) });
   };
   const mode = keyModeOf(prm);
   const detected = prm.bgDetected || (prm.greenDetected != null ? (prm.greenDetected ? 'green' : 'none') : null);
-  const detectedMsg = { green: '✓ Đã phát hiện nền xanh lá — tự động bật.', black: '✓ Đã phát hiện nền đen (lửa/khói/ánh sáng) — tự động bật.', none: 'Không phát hiện nền xanh hay nền đen ở viền video.' }[detected];
+  const detectedMsg = { green: '✓ Đã phát hiện nền xanh lá — tự động bật.', black: '✓ Đã phát hiện nền đen (lửa/khói/ánh sáng) — tự động bật.', transparent: '✓ Video đã có nền trong suốt sẵn — không cần xoá nền.', none: 'Không phát hiện nền xanh hay nền đen ở viền video.' }[detected];
   return (
     <>
       <h3>Cắt phân đoạn video</h3>

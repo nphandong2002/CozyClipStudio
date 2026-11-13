@@ -395,7 +395,7 @@ function keyedFrame(rec, params, mode) {
 /**
  * Look at the border of a video frame to guess its background: mostly green → green screen,
  * (almost) all black → fire/smoke/light footage on black.
- * Returns { kind: 'green' | 'black' | null, color } (color = average border green, '#rrggbb').
+ * Returns { kind: 'green' | 'black' | 'transparent' | null, color } (color = average border green, '#rrggbb').
  */
 export function detectKeyBackground(source, sw, sh) {
   const W = 96;
@@ -413,6 +413,7 @@ export function detectKeyBackground(source, sw, sh) {
   let sg = 0;
   let sb = 0;
   let dark = 0;
+  let clear = 0;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       if (x >= band && x < W - band && y >= band && y < H - band) continue;
@@ -421,6 +422,10 @@ export function detectKeyBackground(source, sw, sh) {
       const g = d[i + 1];
       const b = d[i + 2];
       n++;
+      if (d[i + 3] < 24) {
+        clear++; // already transparent (alpha video)
+        continue;
+      }
       if (Math.max(r, g, b) < 32) dark++;
       if (g > 70 && g > r * 1.3 && g > b * 1.3 && g - Math.max(r, b) > 40) {
         hit++;
@@ -431,6 +436,6 @@ export function detectKeyBackground(source, sw, sh) {
     }
   }
   const color = hit ? rgbToHex(sr / hit, sg / hit, sb / hit) : CHROMA_DEFAULTS.keyColor;
-  const kind = n > 0 && hit / n >= 0.45 ? 'green' : n > 0 && dark / n >= 0.92 ? 'black' : null;
+  const kind = n > 0 && clear / n >= 0.6 ? 'transparent' : n > 0 && hit / n >= 0.45 ? 'green' : n > 0 && dark / n >= 0.92 ? 'black' : null;
   return { kind, color };
 }
