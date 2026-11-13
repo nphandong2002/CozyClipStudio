@@ -284,6 +284,7 @@ export function ScenePanel({ project, update, presets, selection, setSelection }
           {(s.windows || []).map((w, i) => (
             <li key={w.id} className={selWin?.id === w.id ? 'on' : ''} onClick={() => setSelection?.({ kind: 'window', id: w.id })}>
               <span className="grow">🪟 Cửa sổ {i + 1}</span>
+              {w.sky === false && <span className="badge">chỉ thời tiết</span>}
               <span className="badge">{winSize(w)}</span>
             </li>
           ))}
@@ -292,6 +293,20 @@ export function ScenePanel({ project, update, presets, selection, setSelection }
       {selWin && (
         <div className="editor">
           <p className="muted small">Kéo 4 góc vàng trên khung hình để tạo hình bất kỳ (nghiêng, méo, to nhỏ tuỳ ý). Kéo trong lòng vùng để di chuyển cả 4 góc.</p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={selWin.sky !== false}
+              onChange={(e) => update((p) => (p.scene.windows.find((w) => w.id === selWin.id).sky = e.target.checked))}
+            />{' '}
+            Vẽ nền trời (mây, trăng/mặt trời, đồi núi)
+          </label>
+          {selWin.sky === false && (
+            <p className="muted small">
+              Chỉ vẽ thời tiết (mưa, tuyết, chớp sấm, giọt nước trên kính); cảnh trong ảnh nền vẫn nhìn thấy bên dưới.
+              {(s.weather || 'clear') === 'clear' && ' Thời tiết đang là "trời quang" nên vùng này sẽ trống — đổi thời tiết ở trên hoặc trong timeline.'}
+            </p>
+          )}
           <div className="row">
             <button onClick={resetWinRect}>Đặt lại hình chữ nhật</button>
             <button

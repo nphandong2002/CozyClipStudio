@@ -67,8 +67,10 @@ const fireFlicker = (env, seed) => 0.85 + 0.15 * pnoise(env, 3, seed);
 
 /** The live "outside view" (sky + precipitation + lightning + rain on glass + sheen)
  *  painted over a rectangle. No clip here — callers clip to a rect or a polygon first. */
-function drawSkyView(ctx, x, y, w, h, env, seed = 8) {
-  drawSky(ctx, x, y, w, h, env, { seed: 2, sunX: 0.7 });
+// opts.sky === false → weather only (rain/snow/lightning/drops) over whatever is underneath
+function drawSkyView(ctx, x, y, w, h, env, seed = 8, opts = {}) {
+  const sky = opts.sky !== false;
+  if (sky) drawSky(ctx, x, y, w, h, env, { seed: 2, sunX: 0.7 });
   drawPrecip(ctx, x, y, w, h, env, { scale: 0.7, density: 1.4, seed: 4 });
   const f = lightningFlash(env);
   if (f > 0) {
@@ -103,6 +105,7 @@ function drawSkyView(ctx, x, y, w, h, env, seed = 8) {
       ctx.fill();
     }
   }
+  if (!sky) return; // no glass sheen either: the background image already has its own window
   const sg = ctx.createLinearGradient(x, y, x + w, y + h);
   sg.addColorStop(0, 'rgba(255,255,255,0.10)');
   sg.addColorStop(0.5, 'rgba(255,255,255,0)');
@@ -124,7 +127,7 @@ export function drawWindowView(ctx, x, y, w, h, env, seed = 8) {
 
 /** Live window view clipped to an arbitrary 4-point polygon (user window regions).
  *  The sky/weather stay upright and are simply clipped to the quad outline. */
-export function drawWindowQuad(ctx, points, env, seed = 8) {
+export function drawWindowQuad(ctx, points, env, seed = 8, opts = {}) {
   if (!points || points.length < 3) return;
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
@@ -138,7 +141,7 @@ export function drawWindowQuad(ctx, points, env, seed = 8) {
   for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
   ctx.closePath();
   ctx.clip();
-  drawSkyView(ctx, minX, minY, maxX - minX, maxY - minY, env, seed);
+  drawSkyView(ctx, minX, minY, maxX - minX, maxY - minY, env, seed, opts);
   ctx.restore();
 }
 

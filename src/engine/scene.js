@@ -32,7 +32,7 @@ export function renderFrame(ctx, project, rig, state) {
   }
 
   // user-defined "live window" regions (free 4-corner quad over the background)
-  for (const win of project.scene.windows || []) drawWindowQuad(ctx, windowPoints(win), env, (hashStr(win.id) % 9973) + 1);
+  for (const win of project.scene.windows || []) drawWindowQuad(ctx, windowPoints(win), env, (hashStr(win.id) % 9973) + 1, { sky: win.sky !== false });
 
   const props = project.props.filter((p) => p.enabled !== false);
   const back = props.filter((p) => (p.layer || 'back') === 'back');
