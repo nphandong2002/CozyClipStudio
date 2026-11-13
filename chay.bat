@@ -1,22 +1,39 @@
 @echo off
+setlocal
+
+rem Chay tu ban sao trong %TEMP% de "git pull" co the cap nhat chinh file nay
+rem ma khong lam hong script dang chay. LUU Y: khong dat dau ngoac ( ) trong echo ben trong khoi if.
+if /i not "%~1"=="--ban-sao" (
+  copy /y "%~f0" "%TEMP%\cozyclip-chay.bat" >nul 2>nul && (
+    call "%TEMP%\cozyclip-chay.bat" --ban-sao "%~dp0."
+    exit /b
+  )
+)
+
+set "APPDIR=%~dp0."
+if /i "%~1"=="--ban-sao" set "APPDIR=%~2"
+
 chcp 65001 >nul
 title CozyClip Studio
-cd /d "%~dp0"
+cd /d "%APPDIR%"
+if errorlevel 1 goto :loi_thu_muc
 
 echo ============================================
 echo   CozyClip Studio
 echo ============================================
 echo.
 
+rem Khong bao gio hoi mat khau / khong treo khi pull
+set GIT_TERMINAL_PROMPT=0
 where git >nul 2>nul
 if errorlevel 1 (
   echo [i] Khong tim thay git - bo qua cap nhat code.
 ) else (
   if exist ".git" (
-    echo [*] Dang keo code moi nhat (git pull)...
-    git pull
+    echo [*] Dang cap nhat code moi nhat...
+    git -c credential.helper= -c core.askPass= pull --no-edit
     if errorlevel 1 (
-      echo [!] git pull khong thanh cong - bo qua, dung code hien co.
+      echo [!] Khong cap nhat duoc - bo qua, dung code hien co.
     )
   ) else (
     echo [i] Thu muc nay khong phai repo git - bo qua cap nhat.
@@ -43,10 +60,18 @@ if not exist "node_modules" (
   )
 )
 
-echo [*] Dang khoi dong app... (dong cua so Electron de dung)
+echo [*] Dang khoi dong app... - dong cua so Electron de dung
 echo.
 call npm run dev
 
 echo.
 echo [*] App da dung.
 pause
+exit /b 0
+
+:loi_thu_muc
+echo [X] Khong vao duoc thu muc app:
+echo     %APPDIR%
+echo.
+pause
+exit /b 1
