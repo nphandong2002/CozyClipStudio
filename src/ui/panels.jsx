@@ -2,6 +2,25 @@ import React from 'react';
 import { PROPS } from '../engine/props.js';
 import { TIMES, WEATHERS } from '../engine/world.js';
 import { uid } from '../engine/util.js';
+import { renderPropAudio } from '../engine/audio.js';
+import { useAudition } from './useAudioPreview.js';
+
+/** Detect media kind (image | gif | video) and natural aspect ratio of a picked file. */
+function readMediaMeta(file, dataURL, cb) {
+  const type = file.type || '';
+  if (type.startsWith('video')) {
+    const v = document.createElement('video');
+    v.onloadedmetadata = () => cb({ mediaType: 'video', aspect: (v.videoWidth || 16) / (v.videoHeight || 9) });
+    v.onerror = () => cb({ mediaType: 'video', aspect: 16 / 9 });
+    v.src = dataURL;
+  } else {
+    const mediaType = type === 'image/gif' ? 'gif' : 'image';
+    const img = new Image();
+    img.onload = () => cb({ mediaType, aspect: (img.naturalWidth || 1) / (img.naturalHeight || 1) });
+    img.onerror = () => cb({ mediaType, aspect: 1 });
+    img.src = dataURL;
+  }
+}
 
 /** Open the OS file picker and return the chosen file as a data URL. */
 export function pickFile(accept, cb) {
@@ -52,9 +71,16 @@ export function Select({ value, options, onChange }) {
 const pct = (v) => Math.round(v * 100) + '%';
 
 // ------------------------------------------------------------------ scene
-export function ScenePanel({ project, update, presets }) {
+export function ScenePanel({ project, update, presets, selection, setSelection }) {
   const s = project.scene;
   const set = (k, v) => update((p) => (p.scene[k] = v));
+  const selWin = selection?.kind === 'window' ? (s.windows || []).find((w) => w.id === selection.id) : null;
+  const setWin = (k, v) => update((p) => (p.scene.windows.find((w) => w.id === selWin.id)[k] = Math.round(v)));
+  const addWindow = () => {
+    const id = uid('win');
+    update((p) => ((p.scene.windows = p.scene.windows || []), p.scene.windows.push({ id, x: 700, y: 280, w: 520, h: 380 })));
+    setSelection?.({ kind: 'window', id });
+  };
   const mix = project.mix || {};
   const setMix = (k, v) => update((p) => ((p.mix = p.mix || {}), (p.mix[k] = v)));
   const out = project.output;
@@ -96,7 +122,7 @@ export function ScenePanel({ project, update, presets }) {
         <Range value={s.vignette ?? 0.45} min={0} max={0.9} step={0.05} onChange={(v) => set('vignette', v)} fmt={pct} />
       </Field>
 
-      <h3>Ảnh nền & nhạc nền</h3>
+      <h3>Ảnh nền</h3>
       <Field label="Ảnh nền toàn cảnh" hint="Thay nền vẽ bằng code. Nhân vật & vật thể vẫn vẽ đè lên; thời tiết/ánh sáng vẫn hoạt động.">
         <div className="row">
           <button onClick={() => pickFile('image/*', (f, d) => set('backgroundImage', d))}>{s.backgroundImage ? 'Đổi ảnh nền' : '⬆ Tải ảnh nền'}</button>
@@ -107,6 +133,73 @@ export function ScenePanel({ project, update, presets }) {
           )}
         </div>
       </Field>
+      {s.backgroundImage &&
+        (() => {
+          const fr = s.backgroundFrame || {};
+          const setFrame = (k, v) => update((p) => (p.scene.backgroundFrame = { x: 0.5, y: 0.5, zoom: 1, rotate: 0, ...(p.scene.backgroundFrame || {}), [k]: v }));
+          return (
+            <div className="editor">
+              <p className="muted small">Khung cửa sổ: kéo ảnh nền trên khung hình để chọn vùng, hoặc chỉnh dưới đây.</p>
+              <Field label="Phóng to">
+                <Range value={fr.zoom ?? 1} min={1} max={4} step={0.05} onChange={(v) => setFrame('zoom', v)} fmt={(v) => v.toFixed(2) + '×'} />
+              </Field>
+              <Field label="Dịch ngang">
+                <Range value={fr.x ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => setFrame('x', v)} fmt={pct} />
+              </Field>
+              <Field label="Dịch dọc">
+                <Range value={fr.y ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => setFrame('y', v)} fmt={pct} />
+              </Field>
+              <Field label="Xoay / chéo">
+                <Range value={fr.rotate ?? 0} min={-45} max={45} step={1} onChange={(v) => setFrame('rotate', v)} fmt={(v) => v + '°'} />
+              </Field>
+              <button onClick={() => update((p) => (p.scene.backgroundFrame = { x: 0.5, y: 0.5, zoom: 1, rotate: 0 }))}>Đặt lại khung</button>
+            </div>
+          );
+        })()}
+      <h3>Cửa sổ động (trời / thời tiết)</h3>
+      <p className="muted small">Khoanh một vùng để vẽ bầu trời + mưa/tuyết/sấm động vào đó — đặt chồng lên ô cửa trong ảnh nền để nó "sống". Kéo để di chuyển, kéo góc vàng để đổi kích thước.</p>
+      <button onClick={addWindow}>+ Thêm vùng cửa sổ</button>
+      {(s.windows || []).length > 0 && (
+        <ul className="list">
+          {(s.windows || []).map((w, i) => (
+            <li key={w.id} className={selWin?.id === w.id ? 'on' : ''} onClick={() => setSelection?.({ kind: 'window', id: w.id })}>
+              <span className="grow">🪟 Cửa sổ {i + 1}</span>
+              <span className="badge">{w.w}×{w.h}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {selWin && (
+        <div className="editor">
+          <div className="row">
+            <Field label="X">
+              <input type="number" value={selWin.x} onChange={(e) => setWin('x', +e.target.value)} />
+            </Field>
+            <Field label="Y">
+              <input type="number" value={selWin.y} onChange={(e) => setWin('y', +e.target.value)} />
+            </Field>
+          </div>
+          <div className="row">
+            <Field label="Rộng">
+              <input type="number" value={selWin.w} onChange={(e) => setWin('w', Math.max(40, +e.target.value))} />
+            </Field>
+            <Field label="Cao">
+              <input type="number" value={selWin.h} onChange={(e) => setWin('h', Math.max(40, +e.target.value))} />
+            </Field>
+          </div>
+          <button
+            className="danger"
+            onClick={() => {
+              update((p) => (p.scene.windows = (p.scene.windows || []).filter((w) => w.id !== selWin.id)));
+              setSelection?.(null);
+            }}
+          >
+            Xoá vùng cửa sổ
+          </button>
+        </div>
+      )}
+
+      <h3>Nhạc nền</h3>
       <Field label="Nhạc / âm thanh nền" hint="mp3/wav — phát lặp suốt video, trộn ở bước xuất.">
         <div className="row">
           <button onClick={() => pickFile('audio/*', (f, d) => update((p) => (p.audio = { name: f.name, src: d, volume: p.audio?.volume ?? 0.6 })))}>
@@ -166,6 +259,7 @@ export function ScenePanel({ project, update, presets }) {
 
 // ------------------------------------------------------------------ props
 export function PropsPanel({ project, update, selection, setSelection }) {
+  const audition = useAudition();
   const sel = selection?.kind === 'prop' ? project.props.find((p) => p.id === selection.id) : null;
   const setP = (k, v) => update((p) => (p.props.find((x) => x.id === sel.id)[k] = v));
   const setParam = (k, v) => update((p) => {
@@ -186,33 +280,27 @@ export function PropsPanel({ project, update, selection, setSelection }) {
     if (j < 0 || j >= p.props.length) return;
     [p.props[i], p.props[j]] = [p.props[j], p.props[i]];
   });
-  const addImage = () =>
-    pickFile('image/*', (f, dataURL) => {
-      const img = new Image();
-      img.onload = () => {
-        const aspect = (img.naturalWidth || 1) / (img.naturalHeight || 1);
+  const addMedia = () =>
+    pickFile('image/*,video/*', (f, dataURL) =>
+      readMediaMeta(f, dataURL, ({ mediaType, aspect }) => {
         const natH = 360;
         const natW = Math.round(natH * aspect);
-        const id = uid('img');
+        const id = uid(mediaType === 'video' ? 'vid' : mediaType === 'gif' ? 'gif' : 'img');
         const floor = (project.scene.floorLevel ?? 0.74) * 1080;
-        update((p) => p.props.push({ id, type: 'image', x: 960, y: Math.round(floor + 120), scale: 1, layer: 'back', params: { src: dataURL, natW, natH } }));
+        update((p) => p.props.push({ id, type: 'image', x: 960, y: Math.round(floor + 120), scale: 1, layer: 'back', params: { src: dataURL, mediaType, natW, natH } }));
         setSelection({ kind: 'prop', id });
-      };
-      img.src = dataURL;
-    });
-  const changeImage = () =>
-    pickFile('image/*', (f, dataURL) => {
-      const img = new Image();
-      img.onload = () => {
-        const aspect = (img.naturalWidth || 1) / (img.naturalHeight || 1);
+      })
+    );
+  const changeMedia = () =>
+    pickFile('image/*,video/*', (f, dataURL) =>
+      readMediaMeta(f, dataURL, ({ mediaType, aspect }) => {
         update((p) => {
           const o = p.props.find((x) => x.id === sel.id);
           const h = o.params?.natH || 360;
-          o.params = { ...(o.params || {}), src: dataURL, natH: h, natW: Math.round(h * aspect) };
+          o.params = { ...(o.params || {}), src: dataURL, mediaType, natH: h, natW: Math.round(h * aspect) };
         });
-      };
-      img.src = dataURL;
-    });
+      })
+    );
   const def = sel && PROPS[sel.type];
   return (
     <div>
@@ -222,7 +310,7 @@ export function PropsPanel({ project, update, selection, setSelection }) {
         options={[['', '+ Chọn loại vật thể…'], ...Object.entries(PROPS).filter(([k]) => k !== 'image').map(([k, d]) => [k, d.label + (d.sound ? ' 🔊' : '')])]}
         onChange={add}
       />
-      <button onClick={addImage}>⬆ Tải ảnh của bạn làm vật thể</button>
+      <button onClick={addMedia}>⬆ Tải ảnh / GIF / video làm vật thể</button>
       <h3>Danh sách (thứ tự vẽ: trên → dưới)</h3>
       <ul className="list">
         {project.props.map((p) => (
@@ -244,7 +332,7 @@ export function PropsPanel({ project, update, selection, setSelection }) {
           <h3>{def?.label}</h3>
           {sel.type === 'image' && (
             <div className="row">
-              <button onClick={changeImage}>Đổi ảnh khác</button>
+              <button onClick={changeMedia}>Đổi ảnh / GIF / video khác</button>
             </div>
           )}
           <div className="row">
@@ -268,9 +356,16 @@ export function PropsPanel({ project, update, selection, setSelection }) {
             <input type="checkbox" checked={!!sel.flip} onChange={(e) => setP('flip', e.target.checked)} /> Lật ngang
           </label>
           {def?.sound && (
-            <Field label="Âm lượng của vật thể">
-              <Range value={sel.volume ?? 1} min={0} max={2} step={0.05} onChange={(v) => setP('volume', v)} fmt={pct} />
-            </Field>
+            <>
+              <div className="row">
+                <button onClick={() => audition.play(() => renderPropAudio(project, sel), 'prop:' + sel.id)}>
+                  {audition.playingId === 'prop:' + sel.id ? '⏹ Dừng nghe' : '▶ Nghe thử âm thanh'}
+                </button>
+              </div>
+              <Field label="Âm lượng của vật thể">
+                <Range value={sel.volume ?? 1} min={0} max={2} step={0.05} onChange={(v) => setP('volume', v)} fmt={pct} />
+              </Field>
+            </>
           )}
           {sel.type !== 'image' && sel.params &&
             Object.entries(sel.params).map(([k, v]) =>
@@ -348,11 +443,11 @@ export function CharacterPanel({ project, update, rig, charSel, setCharSel }) {
         scale: base.scale ?? 0.6,
         facesLeft: !!base.facesLeft,
       });
+      const floor = Math.round((p.scene.floorLevel ?? 0.74) * 1080) + 120;
       for (const seg of p.timeline) {
         seg.cast = seg.cast || {};
-        const used = Object.values(seg.cast).map((e) => e.anchor);
-        const free = p.anchors.find((a) => !used.includes(a.id)) || p.anchors[0];
-        seg.cast[id] = { action: 'sit', anchor: free?.id };
+        const n = Object.keys(seg.cast).length;
+        seg.cast[id] = { action: 'sit', x: 500 + n * 300, y: floor };
       }
     });
     setCharSel(id);
@@ -362,12 +457,13 @@ export function CharacterPanel({ project, update, rig, charSel, setCharSel }) {
     update((p) => {
       const src = p.characters.find((x) => x.id === sel.id);
       p.characters.push({ ...structuredClone(src), id, name: src.name + ' (bản sao)' });
+      const floor = Math.round((p.scene.floorLevel ?? 0.74) * 1080) + 120;
       for (const seg of p.timeline) {
         seg.cast = seg.cast || {};
         const srcCast = seg.cast[sel.id];
-        const used = Object.values(seg.cast).map((e) => e.anchor);
-        const free = p.anchors.find((a) => !used.includes(a.id)) || p.anchors[0];
-        seg.cast[id] = { action: srcCast?.action || 'sit', anchor: free?.id || srcCast?.anchor };
+        seg.cast[id] = srcCast
+          ? { ...structuredClone(srcCast), x: (srcCast.x ?? 960) + 60, y: (srcCast.y ?? floor) + 20 }
+          : { action: 'sit', x: 960, y: floor };
       }
     });
     setCharSel(id);
@@ -427,70 +523,9 @@ export function CharacterPanel({ project, update, rig, charSel, setCharSel }) {
         </div>
       )}
       <p className="muted small">
-        Mỗi nhân vật có hành động và điểm neo riêng trong từng phân cảnh (chỉnh ở Timeline). Bộ Spine có {cat.characters.length} nhân vật, {cat.costumes.length} trang phục,{' '}
-        {cat.masks.length} mặt nạ, {rig.animNames.length} hành động.
+        Kéo nhân vật trực tiếp trên khung hình để đặt vị trí cho từng phân cảnh (hoặc nhập X/Y ở Timeline). Đổi vị trí giữa 2 phân cảnh → nhân vật tự đi bộ sang. Bộ Spine có{' '}
+        {cat.characters.length} nhân vật, {cat.costumes.length} trang phục, {cat.masks.length} mặt nạ, {rig.animNames.length} hành động.
       </p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- anchors
-export function AnchorsPanel({ project, update, selection, setSelection }) {
-  const sel = selection?.kind === 'anchor' ? project.anchors.find((a) => a.id === selection.id) : null;
-  const set = (k, v) => update((p) => (p.anchors.find((a) => a.id === sel.id)[k] = v));
-  const used = (id) => project.timeline.some((s) => s.cast && Object.values(s.cast).some((e) => e.anchor === id));
-  return (
-    <div>
-      <p className="muted small">Điểm neo = vị trí nhân vật đứng/ngồi/nằm. Mỗi phân cảnh chọn 1 điểm neo; đổi điểm neo giữa 2 phân cảnh thì nhân vật sẽ tự đi bộ sang (có tiếng bước chân).</p>
-      <button
-        onClick={() => {
-          const id = uid('a');
-          update((p) => p.anchors.push({ id, name: 'Điểm neo ' + (p.anchors.length + 1), x: 960, y: 980, scale: 1, flip: false }));
-          setSelection({ kind: 'anchor', id });
-        }}
-      >
-        + Thêm điểm neo
-      </button>
-      <ul className="list">
-        {project.anchors.map((a) => (
-          <li key={a.id} className={sel?.id === a.id ? 'on' : ''} onClick={() => setSelection({ kind: 'anchor', id: a.id })}>
-            <span className="grow">⚓ {a.name}</span>
-            {used(a.id) && <span className="badge">đang dùng</span>}
-          </li>
-        ))}
-      </ul>
-      {sel && (
-        <div className="editor">
-          <Field label="Tên">
-            <input value={sel.name} onChange={(e) => set('name', e.target.value)} />
-          </Field>
-          <div className="row">
-            <Field label="X">
-              <input type="number" value={sel.x} onChange={(e) => set('x', +e.target.value)} />
-            </Field>
-            <Field label="Y (chân)">
-              <input type="number" value={sel.y} onChange={(e) => set('y', +e.target.value)} />
-            </Field>
-          </div>
-          <Field label="Tỉ lệ (gần/xa)">
-            <Range value={sel.scale ?? 1} min={0.4} max={2} step={0.05} onChange={(v) => set('scale', v)} fmt={(v) => v.toFixed(2) + '×'} />
-          </Field>
-          <label className="check">
-            <input type="checkbox" checked={!!sel.flip} onChange={(e) => set('flip', e.target.checked)} /> Quay mặt ngược lại
-          </label>
-          <button
-            className="danger"
-            disabled={used(sel.id) || project.anchors.length <= 1}
-            title={used(sel.id) ? 'Đang được dùng trong timeline' : ''}
-            onClick={() => {
-              update((p) => (p.anchors = p.anchors.filter((a) => a.id !== sel.id)));
-              setSelection(null);
-            }}
-          >
-            Xoá điểm neo
-          </button>
-        </div>
-      )}
     </div>
   );
 }

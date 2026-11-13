@@ -1,7 +1,7 @@
 // Frame composition + timeline planning.
 import { DESIGN_W, DESIGN_H, effectiveScene, lerp, smooth, hashStr } from './util.js';
 import { drawIndoorBackground, drawOutdoorBackground, drawPrecip, drawLighting, drawDust, drawVignette } from './world.js';
-import { drawProp, propLights } from './props.js';
+import { drawProp, propLights, drawWindowView } from './props.js';
 import { getImage } from './images.js';
 
 export const WALK_SPEED = 170; // design px per second at character scale 1.6
@@ -22,7 +22,7 @@ export function renderFrame(ctx, project, rig, state) {
 
   const bgImg = project.scene.backgroundImage ? getImage('bg') : null;
   if (bgImg) {
-    drawImageCover(ctx, bgImg, DESIGN_W, DESIGN_H);
+    drawBackground(ctx, bgImg, DESIGN_W, DESIGN_H, project.scene.backgroundFrame);
     if (!indoor) drawPrecip(ctx, 0, 0, DESIGN_W, DESIGN_H, env, { scale: 0.6, density: 0.8, seed: 5 });
   } else if (indoor) {
     drawIndoorBackground(ctx, env, project.scene);
@@ -30,6 +30,9 @@ export function renderFrame(ctx, project, rig, state) {
     drawOutdoorBackground(ctx, env, project.scene);
     drawPrecip(ctx, 0, 0, DESIGN_W, DESIGN_H, env, { scale: 0.6, density: 0.8, seed: 5 });
   }
+
+  // user-defined "live window" regions over the background (sky/weather shows through)
+  for (const win of project.scene.windows || []) drawWindowView(ctx, win.x, win.y, win.w, win.h, env, (hashStr(win.id) % 9973) + 1);
 
   const props = project.props.filter((p) => p.enabled !== false);
   const back = props.filter((p) => (p.layer || 'back') === 'back');
@@ -64,19 +67,32 @@ function mod(a, b) {
   return ((a % b) + b) % b;
 }
 
-/** Draw an image scaled to cover WxH (like CSS background-size: cover), centred. */
-function drawImageCover(ctx, img, W, H) {
+/**
+ * Draw a background image into WxH with an adjustable "window": pan (x,y in 0..1),
+ * zoom (>=1) and rotate (degrees). Default {0.5,0.5,1,0} == CSS background-size: cover.
+ * Cover scale is rotation-aware so the frame never shows gaps when tilted.
+ */
+export function drawBackground(ctx, img, W, H, frame) {
   const iw = img.naturalWidth || img.width;
   const ih = img.naturalHeight || img.height;
   if (!iw || !ih) return;
-  const s = Math.max(W / iw, H / ih);
+  const f = frame || {};
+  const zoom = f.zoom || 1;
+  const rot = ((f.rotate || 0) * Math.PI) / 180;
+  const cx = f.x ?? 0.5;
+  const cy = f.y ?? 0.5;
+  const ac = Math.abs(Math.cos(rot));
+  const as = Math.abs(Math.sin(rot));
+  const Wr = W * ac + H * as;
+  const Hr = W * as + H * ac;
+  const s = Math.max(Wr / iw, Hr / ih) * zoom;
   const w = iw * s;
   const h = ih * s;
-  ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
-}
-
-export function anchorById(project, id) {
-  return project.anchors.find((a) => a.id === id) || project.anchors[0];
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(rot);
+  ctx.drawImage(img, -w / 2 + (0.5 - cx) * w, -h / 2 + (0.5 - cy) * h, w, h);
+  ctx.restore();
 }
 
 /** List of characters in the project (tolerant of the legacy single-character shape). */
@@ -86,7 +102,7 @@ export function characterList(project) {
   return [];
 }
 
-/** A character's action + anchor for a segment (undefined if that character is not cast). */
+/** A character's { action, x, y, scale?, flip? } for a segment (undefined if not cast). */
 export function castEntry(seg, charId) {
   return seg && seg.cast ? seg.cast[charId] : undefined;
 }
@@ -95,9 +111,12 @@ function charSeed(id) {
   return (hashStr(String(id)) % 9973) + 1;
 }
 
+const MOVE_EPS = 2; // px: below this, a character is considered standing still between segments
+
 /**
  * Placement for every character in this frame, depth-sorted (lower on screen = nearer = drawn on top).
- * During a move clip, each character walks its own from→to; characters that keep their anchor stand still.
+ * During a move clip, each character walks its own from→to position; characters that keep their
+ * position stand still and keep doing their action.
  */
 export function characterPlacements(project, state) {
   const chars = characterList(project);
@@ -107,10 +126,10 @@ export function characterPlacements(project, state) {
     const base = c.scale || 0.6;
     const seed = charSeed(c.id);
     const mv = state.move ? state.move.moveCast?.[c.id] : null;
-    if (mv && mv.from && mv.to && mv.from !== mv.to) {
-      const a = anchorById(project, mv.from);
-      const b = anchorById(project, mv.to);
-      if (!a || !b) continue;
+    const moving = mv && mv.from && mv.to && Math.hypot(mv.to.x - mv.from.x, mv.to.y - mv.from.y) > MOVE_EPS;
+    if (moving) {
+      const a = mv.from;
+      const b = mv.to;
       const u = state.move.u;
       const k = smooth(u);
       const goingRight = b.x > a.x;
@@ -127,22 +146,19 @@ export function characterPlacements(project, state) {
       });
     } else {
       const ce = castEntry(seg, c.id);
-      if (!ce) continue;
-      const a = anchorById(project, ce.anchor);
-      if (!a) continue;
-      out.push({ char: c, seed, free: false, action: ce.action, animT: state.t, x: a.x, y: a.y, scale: base * (a.scale || 1), flip: !!a.flip });
+      if (!ce || typeof ce.x !== 'number') continue;
+      out.push({ char: c, seed, free: false, action: ce.action, animT: state.t, x: ce.x, y: ce.y, scale: base * (ce.scale || 1), flip: !!ce.flip });
     }
   }
   out.sort((p, q) => p.y - q.y);
   return out;
 }
 
-/** Walking time between two anchors (seconds, rounded to whole frames). */
-export function moveDuration(project, fromId, toId) {
-  const a = anchorById(project, fromId);
-  const b = anchorById(project, toId);
-  if (!a || !b || a.id === b.id) return 0;
-  const dist = Math.hypot(b.x - a.x, b.y - a.y);
+/** Walking time between two positions {x,y} (seconds, rounded to whole frames). */
+export function moveDuration(project, from, to) {
+  if (!from || !to) return 0;
+  const dist = Math.hypot(to.x - from.x, to.y - from.y);
+  if (dist <= MOVE_EPS) return 0;
   const fps = project.output.fps;
   const T = Math.min(10, Math.max(2, dist / WALK_SPEED));
   return Math.round(T * fps) / fps;
@@ -162,14 +178,14 @@ export function buildPlan(project) {
   let prev = null;
   project.timeline.forEach((seg, i) => {
     if (prev) {
-      // Per-character walk: each character moves from its previous anchor to its new one.
+      // Per-character walk: each character moves from its previous position to its new one.
       const moveCast = {};
       let maxT = 0;
       for (const c of chars) {
-        const from = castEntry(prev, c.id)?.anchor;
-        const to = castEntry(seg, c.id)?.anchor;
+        const from = castEntry(prev, c.id);
+        const to = castEntry(seg, c.id);
         moveCast[c.id] = { from, to };
-        if (from && to && from !== to) maxT = Math.max(maxT, moveDuration(project, from, to));
+        maxT = Math.max(maxT, moveDuration(project, from, to));
       }
       if (maxT > 0) {
         clips.push({ kind: 'move', id: `move_${i}`, seg, moveCast, T: maxT, phase, repeats: 1 });

@@ -3,7 +3,7 @@
 // Replace any `draw` with an image later — the registry API stays the same.
 import { TAU, mulberry32, osc, pnoise, frac, cyclesFor, mix, rgba, roundRect, clamp, lerp } from './util.js';
 import { drawSky, drawPrecip, lightningFlash } from './world.js';
-import { getImage } from './images.js';
+import { getDrawable } from './images.js';
 
 // ---------------------------------------------------------------- flames
 function flame(ctx, env, w, h, seed, intensity = 1) {
@@ -64,6 +64,61 @@ function logs(ctx, w) {
 }
 
 const fireFlicker = (env, seed) => 0.85 + 0.15 * pnoise(env, 3, seed);
+
+/**
+ * Draw the live "outside view" (sky + precipitation + lightning + rain on glass + sheen)
+ * clipped to a rectangle — no frame/curtains. Reused by the window prop and by
+ * user-defined window regions placed over a background photo.
+ */
+export function drawWindowView(ctx, x, y, w, h, env, seed = 8) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  drawSky(ctx, x, y, w, h, env, { seed: 2, sunX: 0.7 });
+  drawPrecip(ctx, x, y, w, h, env, { scale: 0.7, density: 1.4, seed: 4 });
+  const f = lightningFlash(env);
+  if (f > 0) {
+    ctx.fillStyle = `rgba(230,235,255,${f * 0.75})`;
+    ctx.fillRect(x, y, w, h);
+  }
+  if (env.weather === 'rain' || env.weather === 'storm') {
+    const r = mulberry32(seed);
+    for (let i = 0; i < 70; i++) {
+      const dx = x + r() * w;
+      const dy = y + r() * h;
+      const rad = 1 + r() * 2.5;
+      ctx.fillStyle = 'rgba(220,235,255,0.35)';
+      ctx.beginPath();
+      ctx.arc(dx, dy, rad, 0, TAU);
+      ctx.fill();
+    }
+    for (let i = 0; i < 9; i++) {
+      const cyc = cyclesFor(0.12 + r() * 0.15, env.L);
+      const f2 = frac(env, cyc, r());
+      const dx = x + r() * w;
+      const dy = y + Math.pow(f2, 1.8) * (h + 20);
+      ctx.strokeStyle = 'rgba(220,235,255,0.25)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(dx, dy - 40 * f2);
+      ctx.lineTo(dx, dy);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(230,240,255,0.55)';
+      ctx.beginPath();
+      ctx.arc(dx, dy, 3, 0, TAU);
+      ctx.fill();
+    }
+  }
+  const sg = ctx.createLinearGradient(x, y, x + w, y + h);
+  sg.addColorStop(0, 'rgba(255,255,255,0.10)');
+  sg.addColorStop(0.5, 'rgba(255,255,255,0)');
+  sg.addColorStop(0.6, 'rgba(255,255,255,0.06)');
+  sg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sg;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
 
 // ------------------------------------------------------------- registry
 export const PROPS = {
@@ -144,55 +199,7 @@ export const PROPS = {
       const gh = 300;
       const gx = -gw / 2;
       const gy = -gh - 40;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(gx, gy, gw, gh);
-      ctx.clip();
-      drawSky(ctx, gx, gy, gw, gh, env, { seed: 2, sunX: 0.7 });
-      drawPrecip(ctx, gx, gy, gw, gh, env, { scale: 0.7, density: 1.4, seed: 4 });
-      const f = lightningFlash(env);
-      if (f > 0) {
-        ctx.fillStyle = `rgba(230,235,255,${f * 0.75})`;
-        ctx.fillRect(gx, gy, gw, gh);
-      }
-      // droplets on glass
-      if (env.weather === 'rain' || env.weather === 'storm') {
-        const r = mulberry32(8);
-        for (let i = 0; i < 70; i++) {
-          const dx = gx + r() * gw;
-          const dy = gy + r() * gh;
-          const rad = 1 + r() * 2.5;
-          ctx.fillStyle = 'rgba(220,235,255,0.35)';
-          ctx.beginPath();
-          ctx.arc(dx, dy, rad, 0, TAU);
-          ctx.fill();
-        }
-        for (let i = 0; i < 9; i++) {
-          const cyc = cyclesFor(0.12 + r() * 0.15, env.L);
-          const f2 = frac(env, cyc, r());
-          const dx = gx + r() * gw;
-          const dy = gy + Math.pow(f2, 1.8) * (gh + 20);
-          ctx.strokeStyle = 'rgba(220,235,255,0.25)';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(dx, dy - 40 * f2);
-          ctx.lineTo(dx, dy);
-          ctx.stroke();
-          ctx.fillStyle = 'rgba(230,240,255,0.55)';
-          ctx.beginPath();
-          ctx.arc(dx, dy, 3, 0, TAU);
-          ctx.fill();
-        }
-      }
-      // glass sheen
-      const sg = ctx.createLinearGradient(gx, gy, gx + gw, gy + gh);
-      sg.addColorStop(0, 'rgba(255,255,255,0.10)');
-      sg.addColorStop(0.5, 'rgba(255,255,255,0)');
-      sg.addColorStop(0.6, 'rgba(255,255,255,0.06)');
-      sg.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = sg;
-      ctx.fillRect(gx, gy, gw, gh);
-      ctx.restore();
+      drawWindowView(ctx, gx, gy, gw, gh, env, 8);
       // frame
       ctx.strokeStyle = '#f2e6d4';
       ctx.lineWidth = 16;
@@ -1101,18 +1108,20 @@ export const PROPS = {
   },
 
   image: {
-    label: 'Ảnh của bạn',
+    label: 'Ảnh / GIF / video của bạn',
     layer: 'back',
     w: 300,
     h: 300,
-    params: { src: '', natW: 300, natH: 360 },
+    params: { src: '', mediaType: 'image', natW: 300, natH: 360 },
     size: (p) => ({ w: p.params?.natW || 300, h: p.params?.natH || 360 }),
-    draw(ctx, p) {
+    draw(ctx, p, env) {
       const w = p.params?.natW || 300;
       const h = p.params?.natH || 360;
-      const img = getImage('prop:' + p.id);
-      if (img) {
-        ctx.drawImage(img, -w / 2, -h, w, h);
+      const d = getDrawable('prop:' + p.id, env.t);
+      if (d) {
+        try {
+          ctx.drawImage(d, -w / 2, -h, w, h);
+        } catch (_) {}
       } else {
         // placeholder while the image loads (or if it failed)
         ctx.fillStyle = 'rgba(255,255,255,0.1)';

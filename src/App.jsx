@@ -4,7 +4,7 @@ import { loadRigFromBundle, loadSampleBundle } from './engine/loadSpine.js';
 import { buildPlan, fmtDuration } from './engine/scene.js';
 import Stage from './ui/Stage.jsx';
 import Timeline from './ui/Timeline.jsx';
-import { ScenePanel, PropsPanel, CharacterPanel, AnchorsPanel } from './ui/panels.jsx';
+import { ScenePanel, PropsPanel, CharacterPanel } from './ui/panels.jsx';
 import ExportDialog from './ui/ExportDialog.jsx';
 import { useAudioPreview, useBackgroundAudio } from './ui/useAudioPreview.js';
 import { useHistory } from './ui/useHistory.js';
@@ -152,28 +152,32 @@ export default function App() {
     if (selection.kind === 'prop') {
       update((p) => (p.props = p.props.filter((x) => x.id !== selection.id)));
       setSelection(null);
-    } else if (selection.kind === 'anchor') {
-      const used = project.timeline.some((s) => s.cast && Object.values(s.cast).some((e) => e.anchor === selection.id));
-      if (used || project.anchors.length <= 1) return; // same guard as the panel
-      update((p) => (p.anchors = p.anchors.filter((a) => a.id !== selection.id)));
+    } else if (selection.kind === 'char') {
+      if ((project.characters || []).length <= 1) return;
+      update((p) => {
+        p.characters = p.characters.filter((c) => c.id !== selection.id);
+        for (const s of p.timeline) if (s.cast) delete s.cast[selection.id];
+      });
+      setCharSel(project.characters.find((c) => c.id !== selection.id)?.id || null);
+      setSelection(null);
+    } else if (selection.kind === 'window') {
+      update((p) => (p.scene.windows = (p.scene.windows || []).filter((w) => w.id !== selection.id)));
       setSelection(null);
     }
   };
   const copySel = () => {
-    if (!selection) return;
-    const list = selection.kind === 'prop' ? project.props : project.anchors;
-    const o = list.find((x) => x.id === selection.id);
-    if (o) clipboard.current = { kind: selection.kind, data: structuredClone(o) };
+    if (selection?.kind !== 'prop') return; // only props copy/paste on the stage
+    const o = project.props.find((x) => x.id === selection.id);
+    if (o) clipboard.current = { kind: 'prop', data: structuredClone(o) };
   };
   const pasteClip = () => {
     const c = clipboard.current;
-    if (!c) return;
-    const id = uid(c.kind === 'prop' ? c.data.type : 'a');
+    if (!c || c.kind !== 'prop') return;
+    const id = uid(c.data.type);
     const copy = { ...structuredClone(c.data), id, x: (c.data.x || 0) + 40, y: (c.data.y || 0) + 40 };
-    if (c.kind === 'anchor') copy.name = (c.data.name || 'Điểm neo') + ' (bản sao)';
-    update((p) => (c.kind === 'prop' ? p.props.push(copy) : p.anchors.push(copy)));
-    setSelection({ kind: c.kind, id });
-    setTab(c.kind === 'prop' ? 'props' : 'anchors');
+    update((p) => p.props.push(copy));
+    setSelection({ kind: 'prop', id });
+    setTab('props');
   };
   const duplicateSel = () => {
     copySel();
@@ -181,14 +185,31 @@ export default function App() {
   };
   const nudgeSel = (dx, dy) => {
     if (!selection) return;
-    update((p) => {
-      const list = selection.kind === 'prop' ? p.props : p.anchors;
-      const o = list.find((x) => x.id === selection.id);
-      if (o) {
-        o.x = Math.round((o.x || 0) + dx);
-        o.y = Math.round((o.y || 0) + dy);
-      }
-    }, 'nudge');
+    if (selection.kind === 'prop') {
+      update((p) => {
+        const o = p.props.find((x) => x.id === selection.id);
+        if (o) {
+          o.x = Math.round((o.x || 0) + dx);
+          o.y = Math.round((o.y || 0) + dy);
+        }
+      }, 'nudge');
+    } else if (selection.kind === 'char') {
+      update((p) => {
+        const ce = p.timeline[segIndex]?.cast?.[selection.id];
+        if (ce) {
+          ce.x = Math.round((ce.x || 0) + dx);
+          ce.y = Math.round((ce.y || 0) + dy);
+        }
+      }, 'nudge');
+    } else if (selection.kind === 'window') {
+      update((p) => {
+        const w = (p.scene.windows || []).find((x) => x.id === selection.id);
+        if (w) {
+          w.x = Math.round((w.x || 0) + dx);
+          w.y = Math.round((w.y || 0) + dy);
+        }
+      }, 'nudge');
+    }
   };
 
   // keep the latest closures in a ref so the window listener stays stable
@@ -260,7 +281,6 @@ export default function App() {
               ['scene', 'Cảnh'],
               ['props', 'Vật thể'],
               ['char', 'Nhân vật'],
-              ['anchors', 'Điểm neo'],
             ].map(([k, l]) => (
               <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
                 {l}
@@ -268,10 +288,17 @@ export default function App() {
             ))}
           </nav>
           <div className="panel">
-            {tab === 'scene' && <ScenePanel project={project} update={update} presets={{ room: () => loadPreset(cozyRoomPreset), camp: () => loadPreset(campingPreset) }} />}
+            {tab === 'scene' && (
+              <ScenePanel
+                project={project}
+                update={update}
+                presets={{ room: () => loadPreset(cozyRoomPreset), camp: () => loadPreset(campingPreset) }}
+                selection={selection}
+                setSelection={setSelection}
+              />
+            )}
             {tab === 'props' && <PropsPanel project={project} update={update} selection={selection} setSelection={setSelection} />}
             {tab === 'char' && <CharacterPanel project={project} update={update} rig={rig} charSel={charSel} setCharSel={setCharSel} />}
-            {tab === 'anchors' && <AnchorsPanel project={project} update={update} selection={selection} setSelection={setSelection} />}
           </div>
         </aside>
 
@@ -286,7 +313,11 @@ export default function App() {
             selection={selection}
             setSelection={(s) => {
               setSelection(s);
-              if (s) setTab(s.kind === 'prop' ? 'props' : 'anchors');
+              if (s?.kind === 'prop') setTab('props');
+              else if (s?.kind === 'char') {
+                setTab('char');
+                setCharSel(s.id);
+              } else if (s?.kind === 'window') setTab('scene');
             }}
             update={update}
             onMoveDone={onMoveDone}

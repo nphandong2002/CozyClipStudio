@@ -2,7 +2,7 @@
 import { buildPlan, renderFrame } from './scene.js';
 import { renderClipAudio } from './audio.js';
 import { encodeWav, SR } from './dsp.js';
-import { preloadProject } from './images.js';
+import { preloadProject, seekMediaForExport } from './images.js';
 
 const AUDIO_EXT = {
   'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
@@ -49,6 +49,8 @@ export async function exportProject({ project, rig, api, outFile, onProgress = (
       for (let i = 0; i < frames; i++) {
         if (isCancelled()) throw new Error('cancelled');
         const t = i / fps;
+        const envT = (((t + (clip.phase || 0)) % L) + L) % L;
+        await seekMediaForExport(project, envT); // sync video props to this frame's loop time
         renderFrame(ctx, project, rig, {
           t,
           L,

@@ -1,7 +1,7 @@
-// Starter projects.
+// Starter projects. Each character has a free (x, y) position per timeline segment.
 export function cozyRoomPreset() {
   return {
-    version: 2,
+    version: 3,
     name: 'Phòng ấm áp đêm mưa',
     output: { width: 1920, height: 1080, fps: 30, loopSeconds: 30 },
     spineDir: '',
@@ -26,25 +26,19 @@ export function cozyRoomPreset() {
       { id: 'candle1', type: 'candle', x: 1560, y: 1066, scale: 1.4, layer: 'front' },
       { id: 'fgleaf', type: 'fgLeaves', x: 40, y: 1120, scale: 1.2, layer: 'front', blur: 7 },
     ],
-    anchors: [
-      { id: 'a_chair', name: 'Trên ghế bành', x: 960, y: 860, scale: 1, flip: false },
-      { id: 'a_fire', name: 'Ổ trước lò sưởi', x: 1420, y: 950, scale: 1, flip: true },
-      { id: 'a_book', name: 'Cạnh quyển sách', x: 660, y: 985, scale: 1.05, flip: false },
-      { id: 'a_floor', name: 'Giữa phòng', x: 1150, y: 1000, scale: 1.05, flip: false },
-    ],
     timeline: [
-      { id: 's1', minutes: 10, cast: { c1: { action: 'sitLick', anchor: 'a_book' }, c2: { action: 'sleep', anchor: 'a_fire' } } },
-      { id: 's2', minutes: 15, cast: { c1: { action: 'sit', anchor: 'a_chair' }, c2: { action: 'sleep', anchor: 'a_fire' } } },
-      { id: 's3', minutes: 5, cast: { c1: { action: 'broom', anchor: 'a_floor' }, c2: { action: 'sit', anchor: 'a_chair' } } },
-      { id: 's4', minutes: 40, weather: 'storm', cast: { c1: { action: 'sleep', anchor: 'a_fire' }, c2: { action: 'sitSad', anchor: 'a_book' } } },
-      { id: 's5', minutes: 30, cast: { c1: { action: 'sleep', anchor: 'a_fire' }, c2: { action: 'sleep', anchor: 'a_book' } } },
+      { id: 's1', minutes: 10, cast: { c1: { action: 'sitLick', x: 660, y: 985, scale: 1.05 }, c2: { action: 'sleep', x: 1420, y: 950, flip: true } } },
+      { id: 's2', minutes: 15, cast: { c1: { action: 'sit', x: 960, y: 860 }, c2: { action: 'sleep', x: 1420, y: 950, flip: true } } },
+      { id: 's3', minutes: 5, cast: { c1: { action: 'broom', x: 1150, y: 1000, scale: 1.05 }, c2: { action: 'sit', x: 960, y: 860 } } },
+      { id: 's4', minutes: 40, weather: 'storm', cast: { c1: { action: 'sleep', x: 1420, y: 950, flip: true }, c2: { action: 'sitSad', x: 660, y: 985, scale: 1.05 } } },
+      { id: 's5', minutes: 30, cast: { c1: { action: 'sleep', x: 1420, y: 950, flip: true }, c2: { action: 'sleep', x: 660, y: 985, scale: 1.05 } } },
     ],
   };
 }
 
 export function campingPreset() {
   return {
-    version: 2,
+    version: 3,
     name: 'Cắm trại bên hồ',
     output: { width: 1920, height: 1080, fps: 30, loopSeconds: 30 },
     spineDir: '',
@@ -63,58 +57,78 @@ export function campingPreset() {
       { id: 'grass1', type: 'fgGrass', x: 300, y: 1120, scale: 1.1, layer: 'front', blur: 6 },
       { id: 'grass2', type: 'fgGrass', x: 1750, y: 1130, scale: 1.0, layer: 'front', blur: 6 },
     ],
-    anchors: [
-      { id: 'a_fire', name: 'Bên lửa trại', x: 1110, y: 975, scale: 1, flip: true },
-      { id: 'a_pond', name: 'Bờ ao', x: 1240, y: 960, scale: 1, flip: false },
-    ],
     timeline: [
-      { id: 's1', minutes: 20, cast: { c1: { action: 'sit', anchor: 'a_fire' } } },
-      { id: 's2', minutes: 30, cast: { c1: { action: 'fish', anchor: 'a_pond' } } },
-      { id: 's3', minutes: 40, weather: 'rain', cast: { c1: { action: 'sleep', anchor: 'a_fire' } } },
+      { id: 's1', minutes: 20, cast: { c1: { action: 'sit', x: 1110, y: 975, flip: true } } },
+      { id: 's2', minutes: 30, cast: { c1: { action: 'fish', x: 1240, y: 960 } } },
+      { id: 's3', minutes: 40, weather: 'rain', cast: { c1: { action: 'sleep', x: 1110, y: 975, flip: true } } },
     ],
   };
 }
 
 /**
- * Upgrade a project saved with the old single-character shape
- * (project.character + seg.action/seg.anchor) to the multi-character shape
- * (project.characters[] + seg.cast). Idempotent, so it is safe to run on load.
+ * Upgrade an older project to the current shape:
+ *  - single character  → characters[]
+ *  - seg.action/anchor → seg.cast[charId]
+ *  - anchor references  → free { x, y, scale, flip } positions (anchors array dropped)
+ * Idempotent, so it is safe to run on load.
  */
 export function migrateProject(project) {
   if (!project || typeof project !== 'object') return project;
   const p = structuredClone(project);
-  p.anchors = p.anchors || [];
   p.props = p.props || [];
   p.timeline = p.timeline || [];
+  const anchors = Array.isArray(p.anchors) ? p.anchors : [];
+  const anchorById = (id) => anchors.find((a) => a.id === id);
+  const floorY = Math.round((p.scene?.floorLevel ?? 0.74) * 1080) + 120;
 
   if (!Array.isArray(p.characters)) {
     const base = p.character || { skin: 'skins/shiba', scale: 0.62 };
-    p.characters = [
-      { id: 'c1', name: 'Nhân vật 1', eyes: '', costume: '', mask: '', rod: 'rods/rod1', scale: 0.62, facesLeft: false, ...base },
-    ];
+    p.characters = [{ id: 'c1', name: 'Nhân vật 1', eyes: '', costume: '', mask: '', rod: 'rods/rod1', scale: 0.62, facesLeft: false, ...base }];
   }
   if (!p.characters.length) p.characters.push({ id: 'c1', name: 'Nhân vật 1', skin: 'skins/shiba', eyes: '', costume: '', mask: '', rod: 'rods/rod1', scale: 0.62, facesLeft: false });
   delete p.character;
-
   const firstId = p.characters[0].id;
-  const fallbackAnchor = p.anchors[0]?.id;
+
+  const toPos = (ce) => {
+    const out = { action: ce?.action || 'sit' };
+    if (typeof ce?.x === 'number' && typeof ce?.y === 'number') {
+      out.x = ce.x;
+      out.y = ce.y;
+    } else {
+      const a = anchorById(ce?.anchor);
+      out.x = a?.x ?? 960;
+      out.y = a?.y ?? floorY;
+      if (a?.scale != null && a.scale !== 1) out.scale = a.scale;
+      if (a?.flip) out.flip = true;
+    }
+    if (ce?.scale != null && ce.scale !== 1) out.scale = ce.scale;
+    if (ce?.flip) out.flip = true;
+    return out;
+  };
+
   p.timeline = p.timeline.map((seg) => {
     const s = { ...seg };
-    if (!s.cast) {
-      s.cast = { [firstId]: { action: s.action || 'sit', anchor: s.anchor || fallbackAnchor } };
+    const cast = {};
+    if (s.cast) {
+      for (const [cid, ce] of Object.entries(s.cast)) cast[cid] = toPos(ce);
+    } else {
+      cast[firstId] = toPos({ action: s.action, anchor: s.anchor });
     }
     delete s.action;
     delete s.anchor;
-    // Guarantee every character has a cast entry (e.g. a character added after this segment).
+    // guarantee a cast entry for every character
+    let spread = 0;
     for (const c of p.characters) {
-      if (!s.cast[c.id]) {
-        const used = Object.values(s.cast).map((e) => e.anchor);
-        const free = p.anchors.find((a) => !used.includes(a.id)) || p.anchors[0];
-        s.cast[c.id] = { action: 'sit', anchor: free?.id };
+      if (!cast[c.id]) {
+        cast[c.id] = { action: 'sit', x: 760 + spread * 320, y: floorY };
+        spread++;
       }
     }
+    s.cast = cast;
     return s;
   });
-  p.version = 2;
+
+  delete p.anchors;
+  p.version = 3;
   return p;
 }

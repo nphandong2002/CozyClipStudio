@@ -4,7 +4,7 @@ import { SR, white, biquad, scale, am, place, lfo, click, noiseBurst, thunder, p
 import { lightningEvents } from './world.js';
 import { PROPS, pageFlipEvents } from './props.js';
 import { actionDef, actionSoundEvents } from './character.js';
-import { anchorById, characterList, castEntry } from './scene.js';
+import { characterList, castEntry } from './scene.js';
 
 const cache = new Map();
 function cached(key, build) {
@@ -242,19 +242,17 @@ function propLayers(p, sc, L) {
 }
 
 // ------------------------------------------------------- character action
-/** Footsteps for one character walking fromId → toId over the move clip. */
-function footstepLayers(project, rig, fromId, toId, T, Ns, gain) {
-  const a = anchorById(project, fromId);
-  const b = anchorById(project, toId);
-  if (!a || !b) return [];
+/** Footsteps for one character walking from → to (positions {x,y}) over the move clip. */
+function footstepLayers(project, rig, from, to, T, Ns, gain) {
+  if (!from || !to) return [];
   const walk = rig?.data.findAnimation('walk');
   const d = walk ? walk.duration : 1.07;
-  const r = mulberry32(77 + hashStr(fromId + '>' + toId));
+  const r = mulberry32(77 + Math.round(from.x) * 7 + Math.round(to.x));
   const L = new Float32Array(Ns);
   const R = new Float32Array(Ns);
   for (let t = 0.1; t < T; t += d / 2) {
     const u = t / T;
-    const x = a.x + (b.x - a.x) * u;
+    const x = from.x + (to.x - from.x) * u;
     const p = Math.max(-1, Math.min(1, panOf(x)));
     const ev = noiseBurst(r, 0.09, 0.004, 0.025, [['lowpass', 900], ['highpass', 90]]);
     const g = 0.45 * gain;
@@ -269,12 +267,11 @@ function footstepLayers(project, rig, fromId, toId, T, Ns, gain) {
   return [{ data: L, pan: -1, gain: 1 }, { data: R, pan: 1, gain: 1 }];
 }
 
-/** Sound for one character performing an action at an anchor (loop clips, or standing during a move). */
-function characterActionLayer(project, rig, c, action, anchorId, T, gain) {
+/** Sound for one character performing an action at a position (loop clips, or standing during a move). */
+function characterActionLayer(project, rig, c, action, pos, T, gain) {
   const def = actionDef(action);
   if (!def.sound) return [];
-  const anchor = anchorById(project, anchorId);
-  const pan = panOf(anchor?.x);
+  const pan = panOf(pos?.x);
   const cseed = hashStr(String(c.id));
   const key = `act|${action}|${T}|${c.skin}|${c.id}`;
   const N = Math.round(T * SR);
@@ -345,19 +342,20 @@ function actionLayers(project, rig, clip, Ns) {
   if (clip.kind === 'move') {
     for (const c of chars) {
       const mv = clip.moveCast?.[c.id];
-      if (mv && mv.from && mv.to && mv.from !== mv.to) {
+      const moving = mv && mv.from && mv.to && Math.hypot(mv.to.x - mv.from.x, mv.to.y - mv.from.y) > 2;
+      if (moving) {
         for (const ly of footstepLayers(project, rig, mv.from, mv.to, T, Ns, gain)) out.push(ly);
       } else {
         // Standing while others walk: keep playing its (upcoming segment) action sound.
         const ce = castEntry(clip.seg, c.id);
-        if (ce) for (const ly of characterActionLayer(project, rig, c, ce.action, ce.anchor, T, gain)) out.push(ly);
+        if (ce) for (const ly of characterActionLayer(project, rig, c, ce.action, ce, T, gain)) out.push(ly);
       }
     }
     return out;
   }
   for (const c of chars) {
     const ce = castEntry(clip.seg, c.id);
-    if (ce) for (const ly of characterActionLayer(project, rig, c, ce.action, ce.anchor, T, gain)) out.push(ly);
+    if (ce) for (const ly of characterActionLayer(project, rig, c, ce.action, ce, T, gain)) out.push(ly);
   }
   return out;
 }
@@ -379,6 +377,32 @@ export function renderClipAudio(project, rig, clip) {
   for (const ch of [out.L, out.R]) for (let i = 0; i < Ns; i++) ch[i] *= master;
   softLimit([out.L, out.R]);
   return out;
+}
+
+function masterize(out, Ns, mix) {
+  const master = (mix.master ?? 0.9) * 1.6;
+  for (const ch of [out.L, out.R]) for (let i = 0; i < Ns; i++) ch[i] *= master;
+  softLimit([out.L, out.R]);
+  return out;
+}
+
+/** Audition one prop's sound alone (one loop) — for the "nghe thử" button. */
+export function renderPropAudio(project, prop) {
+  const L = project.output.loopSeconds;
+  const Ns = Math.round(L * SR);
+  const sc = effectiveScene(project, null);
+  const mix = project.mix || {};
+  const layers = propLayers(prop, sc, L).map((ly) => ({ ...ly, gain: ly.gain * (mix.props ?? 1) }));
+  return masterize(mixLayers(layers, Ns), Ns, mix);
+}
+
+/** Audition one character's action sound alone (one loop). */
+export function renderActionAudio(project, rig, char, ce) {
+  const L = project.output.loopSeconds;
+  const Ns = Math.round(L * SR);
+  const mix = project.mix || {};
+  const layers = characterActionLayer(project, rig, char, ce?.action, ce, L, mix.character ?? 1);
+  return masterize(mixLayers(layers, Ns), Ns, mix);
 }
 
 export function clearAudioCache() {

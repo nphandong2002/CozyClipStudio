@@ -1,6 +1,72 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { renderClipAudio } from '../engine/audio.js';
 import { SR } from '../engine/dsp.js';
+
+/** Audition an arbitrary stereo buffer on demand, looped; toggles off if the same id replays. */
+export function useAudition() {
+  const ctxRef = useRef(null);
+  const srcRef = useRef(null);
+  const idRef = useRef(null);
+  const [playingId, setPlayingId] = useState(null);
+
+  const stop = useCallback(() => {
+    if (srcRef.current) {
+      try {
+        srcRef.current.stop();
+      } catch (_) {}
+      srcRef.current = null;
+    }
+    idRef.current = null;
+    setPlayingId(null);
+  }, []);
+
+  const play = useCallback(
+    (makeBuffer, id) => {
+      if (idRef.current === id) {
+        stop();
+        return;
+      }
+      try {
+        if (!ctxRef.current) ctxRef.current = new AudioContext({ sampleRate: SR });
+        const ac = ctxRef.current;
+        if (ac.state === 'suspended') ac.resume();
+        const out = makeBuffer();
+        const buf = ac.createBuffer(2, out.L.length, SR);
+        buf.copyToChannel(out.L, 0);
+        buf.copyToChannel(out.R, 1);
+        if (srcRef.current) {
+          try {
+            srcRef.current.stop();
+          } catch (_) {}
+        }
+        const src = ac.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        src.connect(ac.destination);
+        src.start();
+        srcRef.current = src;
+        idRef.current = id;
+        setPlayingId(id);
+      } catch (e) {
+        console.warn('Không nghe thử được:', e);
+      }
+    },
+    [stop]
+  );
+
+  useEffect(
+    () => () => {
+      if (srcRef.current) {
+        try {
+          srcRef.current.stop();
+        } catch (_) {}
+      }
+    },
+    []
+  );
+
+  return { play, stop, playingId };
+}
 
 /** Renders the current clip's audio (same code as export) and loops it. */
 export function useAudioPreview({ project, rig, clip, playing, clock }) {
@@ -11,7 +77,7 @@ export function useAudioPreview({ project, rig, clip, playing, clock }) {
   // audio depends only on parts of the project that affect sound
   const key = clip
     ? JSON.stringify([clip.id, clip.kind, clip.T, clip.phase, clip.seg?.cast, clip.moveCast, clip.seg?.weather, clip.seg?.timeOfDay, project.scene, project.mix, project.output.loopSeconds,
-        project.props.map((p) => [p.id, p.type, p.enabled, p.volume, Math.round(p.x / 40)]), (project.characters || []).map((c) => [c.id, c.skin]), project.anchors, !!rig])
+        project.props.map((p) => [p.id, p.type, p.enabled, p.volume, Math.round(p.x / 40)]), (project.characters || []).map((c) => [c.id, c.skin]), !!rig])
     : '';
 
   useEffect(() => {

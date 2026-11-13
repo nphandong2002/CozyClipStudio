@@ -19,29 +19,28 @@ npm run dev
 ## Cách dùng
 
 1. **Cảnh**: trong nhà / ngoài trời, thời điểm (ngày, hoàng hôn, đêm), thời tiết (mưa, giông, tuyết, sương), màu tường/sàn, âm lượng từng nhóm, độ phân giải, độ dài vòng lặp.
-2. **Vật thể**: thêm lò sưởi, cửa sổ (hiện thời tiết bên ngoài), kệ sách, sách lật trang, đồng hồ, đèn, nến, máy hát, lửa trại, ao… Vật thể **ngoài trời** có tiếng riêng: suối/thác nhỏ (nước chảy róc rách), chuông gió (leng keng theo gió), bụi cây (lá xào xạc theo thời tiết), đài phun nước (róc rách nhẹ). Mỗi vật thể có lớp *Nền* hoặc *Tiền cảnh* (vẽ trước nhân vật) và độ mờ để tạo chiều sâu. Vật thể có 🔊 tự phát tiếng ASMR, chỉnh âm lượng riêng; tiếng được đặt trái/phải theo vị trí vật thể.
-3. **Nhân vật**: thêm **nhiều nhân vật** vào cùng một clip (nút *Thêm nhân vật*). Mỗi nhân vật chọn riêng nhân vật trong bộ Spine, màu mắt, trang phục, mặt nạ, cần câu, kích thước. Nhân vật đứng gần (thấp hơn trên khung) tự được vẽ đè lên để tạo chiều sâu.
-4. **Điểm neo**: vị trí nhân vật ngồi/nằm/đứng. Kéo thả trực tiếp trên khung hình. Mỗi nhân vật nên dùng điểm neo khác nhau để không chồng lên nhau.
-5. **Timeline**: mỗi phân cảnh = số phút (+ đổi thời tiết/thời điểm nếu muốn), và **từng nhân vật có hành động + điểm neo riêng**. Nhân vật nào đổi điểm neo giữa 2 phân cảnh sẽ tự đi bộ sang (có tiếng bước chân); nhân vật khác đứng yên làm việc của mình. Âm thanh của mỗi nhân vật được đặt trái/phải theo điểm neo.
-6. **Xuất video** → MP4 H.264 + AAC.
+2. **Vật thể**: thêm lò sưởi, cửa sổ (hiện thời tiết bên ngoài), kệ sách, sách lật trang, đồng hồ, đèn, nến, máy hát, lửa trại, ao… Vật thể **ngoài trời** có tiếng riêng: suối/thác nhỏ, chuông gió, bụi cây (lá xào xạc), đài phun nước. Mỗi vật thể có lớp *Nền* hoặc *Tiền cảnh* và độ mờ để tạo chiều sâu. Vật thể có 🔊 tự phát tiếng ASMR, có nút **▶ Nghe thử âm thanh** và chỉnh âm lượng riêng; tiếng đặt trái/phải theo vị trí. Cũng có thể **tải ảnh / GIF / video** của bạn làm vật thể.
+3. **Nhân vật**: thêm **nhiều nhân vật** vào cùng một clip (nút *Thêm nhân vật*). Mỗi nhân vật chọn riêng nhân vật trong bộ Spine, màu mắt, trang phục, mặt nạ, cần câu, kích thước. Nhân vật đứng thấp hơn trên khung tự được vẽ đè lên để tạo chiều sâu.
+4. **Vị trí & di chuyển (không còn điểm neo)**: **kéo nhân vật trực tiếp trên khung hình** để đặt vị trí cho **từng phân cảnh** (hoặc nhập X/Y ở Timeline). Mỗi phân cảnh = số phút (+ đổi thời tiết/thời điểm nếu muốn) và, cho từng nhân vật: **hành động + vị trí (X/Y) + lật**. Nhân vật nào đổi vị trí giữa 2 phân cảnh sẽ **tự đi bộ** sang (có tiếng bước chân); nhân vật khác đứng yên làm việc của mình. Âm thanh mỗi nhân vật đặt trái/phải theo vị trí.
+5. **Xuất video** → MP4 H.264 + AAC.
 
 ### Tải lên của riêng bạn
-- **Ảnh làm vật thể**: tab *Vật thể* → **Tải ảnh của bạn làm vật thể** (PNG trong suốt là đẹp nhất). Ảnh thành một vật thể như mọi vật thể khác: kéo thả, chỉnh kích thước, lớp nền/tiền cảnh, làm mờ, lật ngang. Nút *Đổi ảnh khác* để thay.
-- **Ảnh nền toàn cảnh**: tab *Cảnh* → **Tải ảnh nền**. Ảnh phủ kín khung (kiểu *cover*) thay cho nền vẽ code; nhân vật, vật thể, thời tiết và ánh sáng vẫn vẽ đè lên.
-- **Nhạc / âm thanh nền**: tab *Cảnh* → **Tải nhạc nền** (mp3/wav). Nghe thử ngay trong app (phát lặp), chỉnh âm lượng riêng; khi xuất video, nhạc được ffmpeg lặp đủ độ dài và trộn cùng tiếng ASMR tổng hợp.
+- **Ảnh / GIF / video làm vật thể**: tab *Vật thể* → **Tải ảnh / GIF / video làm vật thể**. Thành một vật thể như mọi cái khác: kéo thả, chỉnh kích thước, lớp nền/tiền cảnh, làm mờ, lật. GIF và video **chạy động** (xem trước phát mượt); nút *Đổi…* để thay. Khi xuất, video được lấy từng khung (chậm hơn chút) — nên dùng clip lặp liền mạch và để độ dài vòng lặp là bội số độ dài clip.
+- **Ảnh nền toàn cảnh + khung cửa sổ**: tab *Cảnh* → **Tải ảnh nền**. Chọn vùng hiển thị (khung cửa sổ): **kéo ảnh nền trên khung hình** để dời, hoặc dùng thanh **Phóng to / Dịch ngang / Dịch dọc / Xoay (chéo)**; nút *Đặt lại khung*. Nhân vật, vật thể, thời tiết, ánh sáng vẫn vẽ đè lên.
+- **Nhạc / âm thanh nền**: tab *Cảnh* → **Tải nhạc nền** (mp3/wav). Nghe thử ngay (phát lặp), chỉnh âm lượng riêng; khi xuất, nhạc được ffmpeg lặp đủ độ dài và trộn cùng tiếng ASMR tổng hợp.
 
 > Ảnh/nhạc được nhúng thẳng vào file dự án `.cozy.json` (dạng data URL) nên mở ở máy khác vẫn đủ. Dự án có nhiều ảnh/nhạc lớn có thể vượt giới hạn tự lưu nháp của trình duyệt — cứ **Lưu** ra file để chắc chắn.
 
 ### Phím tắt
-Chọn một vật thể / điểm neo (bấm trên khung hình) rồi dùng:
+Chọn một vật thể / nhân vật (bấm trên khung hình) rồi dùng:
 
 | Phím | Tác dụng |
 |---|---|
-| `Delete` / `Backspace` | Xoá vật thể / điểm neo đang chọn (điểm neo đang dùng trong timeline thì không xoá) |
+| `Delete` / `Backspace` | Xoá vật thể đang chọn (hoặc xoá nhân vật nếu còn nhiều hơn 1) |
 | `Ctrl+Z` / `Ctrl+Y` (hoặc `Ctrl+Shift+Z`) | Hoàn tác / Làm lại |
-| `Ctrl+C` / `Ctrl+V` | Chép / Dán (dán lệch 40px) |
-| `Ctrl+D` | Nhân bản tại chỗ |
-| `← → ↑ ↓` | Dịch 1px (giữ `Shift` = 10px) |
+| `Ctrl+C` / `Ctrl+V` | Chép / Dán vật thể (dán lệch 40px) |
+| `Ctrl+D` | Nhân bản vật thể tại chỗ |
+| `← → ↑ ↓` | Dời vật thể / nhân vật đang chọn (giữ `Shift` = 10px) |
 | `Ctrl+S` | Lưu dự án |
 
 Kéo thả bằng chuột được gộp thành **một** bước hoàn tác. Phím tắt không kích hoạt khi đang gõ trong ô nhập liệu.
