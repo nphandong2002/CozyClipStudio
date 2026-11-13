@@ -63,11 +63,16 @@ if not exist "node_modules" (
 echo [*] Dang khoi dong app... - dong cua so Electron de dung
 echo.
 call npm run dev
-
-echo.
-echo [*] App da dung.
-pause
+if errorlevel 1 goto :loi_app
+rem Dong Electron binh thuong thi tu dong cua so nay luon
 exit /b 0
+
+:loi_app
+echo.
+echo [X] App dung do loi - xem thong bao phia tren.
+echo.
+pause
+exit /b 1
 
 :loi_thu_muc
 echo [X] Khong vao duoc thu muc app:
