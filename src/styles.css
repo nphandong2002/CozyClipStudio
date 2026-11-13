@@ -91,3 +91,8 @@ h2 { margin: 0 0 12px; }
 .progress > span { position: relative; padding: 0 10px; line-height: 26px; font-size: 12px; }
 .error { color: var(--danger); }
 .ok { color: #9fd49a; }
+.block { display: block; margin-top: 4px; }
+.progress.slim { height: 20px; margin: 8px 0; }
+.progress.slim > span { line-height: 20px; }
+.upload-error { display: flex; gap: 8px; align-items: center; margin: 8px 0; padding: 6px 8px; border: 1px solid #5a2f29; border-radius: 6px; background: #2a1a18; }
+.upload-error .error { flex: 1; font-size: 12px; }

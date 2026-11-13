@@ -1139,7 +1139,7 @@ export const PROPS = {
     draw(ctx, p, env) {
       const w = p.params?.natW || 300;
       const h = p.params?.natH || 360;
-      const d = getDrawable('prop:' + p.id, env.t);
+      const d = getDrawable('prop:' + p.id, env.t, p.params);
       if (d) {
         try {
           ctx.drawImage(d, -w / 2, -h, w, h);

@@ -2,7 +2,7 @@
 import { buildPlan, renderFrame } from './scene.js';
 import { renderClipAudio } from './audio.js';
 import { encodeWav, SR } from './dsp.js';
-import { preloadProject, seekMediaForExport } from './images.js';
+import { preloadProject, seekMediaForExport, resumeMediaPlayback } from './images.js';
 
 const AUDIO_EXT = {
   'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
@@ -79,5 +79,7 @@ export async function exportProject({ project, rig, api, outFile, onProgress = (
   } catch (e) {
     await api.cancelExport();
     throw e;
+  } finally {
+    resumeMediaPlayback(); // video props were paused for frame-accurate seeking
   }
 }

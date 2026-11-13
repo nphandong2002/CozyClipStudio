@@ -5,38 +5,148 @@ import { uid } from '../engine/util.js';
 import { renderPropAudio } from '../engine/audio.js';
 import { windowPoints } from '../engine/scene.js';
 import { useAudition } from './useAudioPreview.js';
+import { setImageSrc, detectGreenScreen, getVideoElement, getMediaDuration, CHROMA_DEFAULTS, trimRange } from '../engine/images.js';
 
-/** Detect media kind (image | gif | video) and natural aspect ratio of a picked file. */
-function readMediaMeta(file, dataURL, cb) {
-  const type = file.type || '';
-  if (type.startsWith('video')) {
-    const v = document.createElement('video');
-    v.onloadedmetadata = () => cb({ mediaType: 'video', aspect: (v.videoWidth || 16) / (v.videoHeight || 9) });
-    v.onerror = () => cb({ mediaType: 'video', aspect: 16 / 9 });
-    v.src = dataURL;
-  } else {
-    const mediaType = type === 'image/gif' ? 'gif' : 'image';
-    const img = new Image();
-    img.onload = () => cb({ mediaType, aspect: (img.naturalWidth || 1) / (img.naturalHeight || 1) });
-    img.onerror = () => cb({ mediaType, aspect: 1 });
-    img.src = dataURL;
+const VIDEO_ERR = 'Không đọc được video (định dạng/codec không hỗ trợ). Hãy dùng MP4 (H.264) hoặc WebM.';
+
+/** Read a File as a data URL, reporting progress 0..1. */
+function readAsDataURL(file, onProgress = () => {}) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('Không đọc được file: ' + (fr.error?.message || file.name)));
+    fr.readAsDataURL(file);
+  });
+}
+
+/** Wait for a media element event (or reject on error / timeout). */
+function waitFor(el, ev, ms, errMsg) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => (cleanup(), reject(new Error(errMsg))), ms);
+    const ok = () => (cleanup(), resolve());
+    const bad = () => (cleanup(), reject(new Error(errMsg)));
+    const cleanup = () => {
+      clearTimeout(timer);
+      el.removeEventListener(ev, ok);
+      el.removeEventListener('error', bad);
+    };
+    el.addEventListener(ev, ok);
+    el.addEventListener('error', bad);
+  });
+}
+
+/** Video metadata (aspect, duration) + green-screen detection on an early frame. */
+async function probeVideo(file) {
+  const url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  v.muted = true;
+  v.preload = 'auto';
+  try {
+    const meta = waitFor(v, 'loadedmetadata', 20000, VIDEO_ERR);
+    v.src = url;
+    await meta;
+    const duration = isFinite(v.duration) ? v.duration : 0;
+    const aspect = (v.videoWidth || 16) / (v.videoHeight || 9);
+    let green = { green: false, color: CHROMA_DEFAULTS.keyColor };
+    try {
+      const seeked = waitFor(v, 'seeked', 8000, VIDEO_ERR);
+      v.currentTime = Math.min(0.2, duration / 2 || 0);
+      await seeked;
+      green = detectGreenScreen(v, v.videoWidth, v.videoHeight);
+    } catch (_) {
+      // detection is best effort; the video itself loaded fine
+    }
+    return { aspect, duration, green };
+  } finally {
+    v.removeAttribute('src');
+    v.load();
+    URL.revokeObjectURL(url);
   }
 }
 
-/** Open the OS file picker and return the chosen file as a data URL. */
-export function pickFile(accept, cb) {
+function probeImage(dataURL) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ aspect: (img.naturalWidth || 1) / (img.naturalHeight || 1) });
+    img.onerror = () => resolve({ aspect: 1 });
+    img.src = dataURL;
+  });
+}
+
+/**
+ * Read + analyse + preload a picked media file for prop `key`, reporting
+ * onStage({ label, progress }) along the way. Resolves to the prop params to store.
+ */
+async function loadMediaFile(file, key, onStage) {
+  const type = file.type || '';
+  const isVideo = type.startsWith('video');
+  const mediaType = isVideo ? 'video' : type === 'image/gif' ? 'gif' : 'image';
+  onStage({ label: 'Đang đọc file', progress: 0 });
+  const dataURL = await readAsDataURL(file, (f) => onStage({ label: 'Đang đọc file', progress: f * 0.7 }));
+  onStage({ label: isVideo ? 'Đang phân tích video' : 'Đang phân tích ảnh', progress: 0.75 });
+  const extra = {};
+  let aspect;
+  if (isVideo) {
+    const info = await probeVideo(file);
+    aspect = info.aspect;
+    Object.assign(extra, {
+      duration: info.duration,
+      trimStart: 0,
+      trimEnd: null,
+      chromaKey: info.green.green,
+      greenDetected: info.green.green,
+      ...CHROMA_DEFAULTS,
+      keyColor: info.green.green ? info.green.color : CHROMA_DEFAULTS.keyColor,
+    });
+  } else {
+    aspect = (await probeImage(dataURL)).aspect;
+  }
+  onStage({ label: 'Đang nạp vào cảnh', progress: 0.9 });
+  const rec = await setImageSrc(key, dataURL, mediaType, isVideo ? file : null);
+  if (isVideo && (!rec || !rec.ready)) throw new Error(rec?.error || VIDEO_ERR);
+  onStage({ label: 'Xong', progress: 1 });
+  return { src: dataURL, mediaType, aspect, extra };
+}
+
+/** Open the OS file picker; cb(file, dataURL), or cb(file) only when `raw` is set. */
+export function pickFile(accept, cb, raw = false) {
   const inp = document.createElement('input');
   inp.type = 'file';
   inp.accept = accept;
   inp.onchange = () => {
     const f = inp.files && inp.files[0];
     if (!f) return;
+    if (raw) return cb(f);
     const fr = new FileReader();
     fr.onload = () => cb(f, fr.result);
     fr.readAsDataURL(f);
   };
   inp.click();
 }
+
+/** Slim progress bar / error line for an in-flight media upload. */
+function UploadStatus({ state, onClose }) {
+  if (!state) return null;
+  if (state.error)
+    return (
+      <div className="upload-error">
+        <span className="error">⚠ {state.name ? state.name + ': ' : ''}{state.error}</span>
+        <button onClick={onClose}>Đóng</button>
+      </div>
+    );
+  const p = Math.round((state.progress || 0) * 100);
+  return (
+    <div className="progress slim" title={state.name}>
+      <div style={{ width: p + '%' }} />
+      <span>
+        {state.label}… {p}%
+      </span>
+    </div>
+  );
+}
+
+const fmtSec = (s) => (s >= 60 ? Math.floor(s / 60) + ':' + (s % 60).toFixed(1).padStart(4, '0') : s.toFixed(2) + 's');
 
 export function Field({ label, children, hint }) {
   return (
@@ -277,27 +387,62 @@ export function PropsPanel({ project, update, selection, setSelection }) {
     if (j < 0 || j >= p.props.length) return;
     [p.props[i], p.props[j]] = [p.props[j], p.props[i]];
   });
+  const setParams = (obj) => update((p) => {
+    const o = p.props.find((x) => x.id === sel.id);
+    o.params = { ...(o.params || {}), ...obj };
+  });
+  const [upload, setUpload] = React.useState(null); // { name, label, progress, error }
+  const busy = upload && !upload.error;
+  // read → analyse (green screen) → preload, with a progress bar; then onDone(media)
+  const runUpload = (file, key, onDone, onFail = () => setImageSrc(key, null)) => {
+    setUpload({ name: file.name, label: 'Đang đọc file', progress: 0 });
+    loadMediaFile(file, key, (st) => setUpload({ name: file.name, ...st }))
+      .then((m) => {
+        onDone(m);
+        setUpload(null);
+      })
+      .catch((e) => {
+        onFail(); // drop (or restore) the half-loaded record
+        setUpload({ name: file.name, error: e?.message || String(e) });
+      });
+  };
   const addMedia = () =>
-    pickFile('image/*,video/*', (f, dataURL) =>
-      readMediaMeta(f, dataURL, ({ mediaType, aspect }) => {
+    pickFile('image/*,video/*', (f) => {
+      const kind = (f.type || '').startsWith('video') ? 'vid' : f.type === 'image/gif' ? 'gif' : 'img';
+      const id = uid(kind);
+      runUpload(f, 'prop:' + id, ({ src, mediaType, aspect, extra }) => {
         const natH = 360;
         const natW = Math.round(natH * aspect);
-        const id = uid(mediaType === 'video' ? 'vid' : mediaType === 'gif' ? 'gif' : 'img');
         const floor = (project.scene.floorLevel ?? 0.74) * 1080;
-        update((p) => p.props.push({ id, type: 'image', x: 960, y: Math.round(floor + 120), scale: 1, layer: 'back', params: { src: dataURL, mediaType, natW, natH } }));
+        update((p) => p.props.push({ id, type: 'image', x: 960, y: Math.round(floor + 120), scale: 1, layer: 'back', params: { src, mediaType, natW, natH, ...extra } }));
         setSelection({ kind: 'prop', id });
-      })
-    );
-  const changeMedia = () =>
-    pickFile('image/*,video/*', (f, dataURL) =>
-      readMediaMeta(f, dataURL, ({ mediaType, aspect }) => {
+      });
+    }, true);
+  const changeMedia = () => {
+    const id = sel.id;
+    const old = sel.params || {};
+    pickFile('image/*,video/*', (f) =>
+      runUpload(f, 'prop:' + id, ({ src, mediaType, aspect, extra }) =>
         update((p) => {
-          const o = p.props.find((x) => x.id === sel.id);
+          const o = p.props.find((x) => x.id === id);
+          if (!o) return;
           const h = o.params?.natH || 360;
-          o.params = { ...(o.params || {}), src: dataURL, mediaType, natH: h, natW: Math.round(h * aspect) };
-        });
-      })
-    );
+          const keep = { ...(o.params || {}) };
+          for (const k of ['duration', 'trimStart', 'trimEnd', 'chromaKey', 'greenDetected', ...Object.keys(CHROMA_DEFAULTS)]) delete keep[k];
+          o.params = { ...keep, src, mediaType, natH: h, natW: Math.round(h * aspect), ...extra };
+        }),
+      () => setImageSrc('prop:' + id, old.src, old.mediaType || 'image')
+      ), true);
+  };
+  const isVideo = sel?.type === 'image' && sel.params?.mediaType === 'video';
+  const vidDur = isVideo ? sel.params.duration || getMediaDuration('prop:' + sel.id) : 0;
+  // older projects don't store the duration: poll until the video has loaded
+  const [, tick] = React.useState(0);
+  React.useEffect(() => {
+    if (!isVideo || vidDur) return;
+    const t = setInterval(() => tick((x) => x + 1), 400);
+    return () => clearInterval(t);
+  }, [isVideo, vidDur]);
   const def = sel && PROPS[sel.type];
   return (
     <div>
@@ -307,7 +452,8 @@ export function PropsPanel({ project, update, selection, setSelection }) {
         options={[['', '+ Chọn loại vật thể…'], ...Object.entries(PROPS).filter(([k]) => k !== 'image').map(([k, d]) => [k, d.label + (d.sound ? ' 🔊' : '')])]}
         onChange={add}
       />
-      <button onClick={addMedia}>⬆ Tải ảnh / GIF / video làm vật thể</button>
+      <button onClick={addMedia} disabled={busy}>⬆ Tải ảnh / GIF / video làm vật thể</button>
+      <UploadStatus state={upload} onClose={() => setUpload(null)} />
       <h3>Danh sách (thứ tự vẽ: trên → dưới)</h3>
       <ul className="list">
         {project.props.map((p) => (
@@ -329,9 +475,10 @@ export function PropsPanel({ project, update, selection, setSelection }) {
           <h3>{def?.label}</h3>
           {sel.type === 'image' && (
             <div className="row">
-              <button onClick={changeMedia}>Đổi ảnh / GIF / video khác</button>
+              <button onClick={changeMedia} disabled={busy}>Đổi ảnh / GIF / video khác</button>
             </div>
           )}
+          {isVideo && <VideoMediaEditor sel={sel} setParams={setParams} dur={vidDur} loopSeconds={project.output.loopSeconds} />}
           <div className="row">
             <Field label="X">
               <input type="number" value={sel.x} onChange={(e) => setP('x', +e.target.value)} />
@@ -410,6 +557,94 @@ export function PropsPanel({ project, update, selection, setSelection }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Video object: segment trim + green-screen removal (both apply to preview and export). */
+function VideoMediaEditor({ sel, setParams, dur, loopSeconds }) {
+  const prm = sel.params || {};
+  const key = 'prop:' + sel.id;
+  const { start, end } = trimRange(prm, dur);
+  const len = end - start;
+  const L = loopSeconds || 0;
+  const reps = len > 0 ? L / len : 0;
+  const seamless = !L || len <= 0 || Math.abs(reps - Math.round(reps)) < 0.01 || len >= dur - 0.01;
+  const setStart = (v) => setParams({ trimStart: Math.min(v, end - 0.1) });
+  const setEnd = (v) => setParams({ trimEnd: Math.max(v, start + 0.1) });
+  // make the segment length divide the loop length so the exported loop has no jump
+  const fitLoop = () => {
+    let n = Math.max(1, Math.round(L / len));
+    while (n > 1 && start + L / n > dur) n--;
+    const want = L / Math.max(1, n);
+    if (start + want <= dur) setParams({ trimEnd: +(start + want).toFixed(3) });
+    else setParams({ trimStart: Math.max(0, +(dur - want).toFixed(3)), trimEnd: dur });
+  };
+  const redetect = () => {
+    const v = getVideoElement(key);
+    if (!v) return;
+    const r = detectGreenScreen(v, v.videoWidth, v.videoHeight);
+    setParams(r.green ? { keyColor: r.color, chromaKey: true, greenDetected: true } : { greenDetected: false });
+  };
+  const ck = !!prm.chromaKey;
+  return (
+    <>
+      <h3>Cắt phân đoạn video</h3>
+      {dur > 0 ? (
+        <>
+          <Field label="Bắt đầu">
+            <Range value={+start.toFixed(2)} min={0} max={+dur.toFixed(2)} step={0.05} onChange={setStart} fmt={fmtSec} />
+          </Field>
+          <Field label="Kết thúc">
+            <Range value={+end.toFixed(2)} min={0} max={+dur.toFixed(2)} step={0.05} onChange={setEnd} fmt={fmtSec} />
+          </Field>
+          <small className="muted">
+            Phát lặp đoạn {fmtSec(start)} → {fmtSec(end)} (dài {fmtSec(len)} / cả video {fmtSec(dur)}) — trong khung xem trước và khi xuất.
+          </small>
+          {!seamless && (
+            <small className="muted block">
+              Vòng lặp cảnh dài {L}s không chia hết cho độ dài đoạn → video sẽ nhảy khi cảnh lặp lại.
+            </small>
+          )}
+          <div className="row" style={{ marginTop: 6 }}>
+            {!seamless && <button onClick={fitLoop}>Khớp với vòng lặp {L}s</button>}
+            <button onClick={() => setParams({ trimStart: 0, trimEnd: null })} disabled={len >= dur - 0.01}>
+              Dùng cả video
+            </button>
+          </div>
+        </>
+      ) : (
+        <small className="muted">Đang tải video…</small>
+      )}
+      <h3>Xoá nền xanh (chroma key)</h3>
+      <label className="check">
+        <input type="checkbox" checked={ck} onChange={(e) => setParams({ chromaKey: e.target.checked })} /> Làm trong suốt nền xanh lá
+      </label>
+      {prm.greenDetected != null && (
+        <small className="muted block">{prm.greenDetected ? '✓ Đã phát hiện nền xanh — tự động bật.' : 'Không phát hiện nền xanh ở viền video.'}</small>
+      )}
+      {ck && (
+        <>
+          <Field label="Màu nền cần xoá">
+            <div className="row" style={{ margin: 0 }}>
+              <input type="color" value={prm.keyColor || CHROMA_DEFAULTS.keyColor} onChange={(e) => setParams({ keyColor: e.target.value })} />
+              <button onClick={redetect} title="Lấy màu xanh ở viền khung hình hiện tại">
+                Tự dò màu
+              </button>
+            </div>
+          </Field>
+          <Field label="Độ nhạy" hint="Cao hơn = xoá rộng hơn (kể cả vùng xanh tối/bóng đổ).">
+            <Range value={prm.keySimilarity ?? CHROMA_DEFAULTS.keySimilarity} min={0.05} max={0.95} step={0.01} onChange={(v) => setParams({ keySimilarity: v })} fmt={pct} />
+          </Field>
+          <Field label="Độ mềm viền">
+            <Range value={prm.keySmoothness ?? CHROMA_DEFAULTS.keySmoothness} min={0.01} max={0.6} step={0.01} onChange={(v) => setParams({ keySmoothness: v })} fmt={pct} />
+          </Field>
+          <Field label="Khử ánh xanh ở viền">
+            <Range value={prm.keySpill ?? CHROMA_DEFAULTS.keySpill} min={0} max={1} step={0.05} onChange={(v) => setParams({ keySpill: v })} fmt={pct} />
+          </Field>
+          <button onClick={() => setParams({ ...CHROMA_DEFAULTS, keyColor: prm.keyColor || CHROMA_DEFAULTS.keyColor })}>Đặt lại thông số</button>
+        </>
+      )}
+    </>
   );
 }
 

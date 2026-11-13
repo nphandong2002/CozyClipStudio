@@ -69,39 +69,52 @@ function loadGifRecord(src) {
   return rec;
 }
 
-function loadVideoRecord(src) {
+function loadVideoRecord(src, blob) {
   const video = document.createElement('video');
   video.muted = true;
   video.loop = true;
   video.playsInline = true;
   video.preload = 'auto';
-  const rec = { kind: 'video', src, video, ready: false, duration: 0, blobUrl: null };
-  try {
-    rec.blobUrl = URL.createObjectURL(dataUrlToBlob(src));
-  } catch (_) {
-    rec.blobUrl = src;
-  }
-  rec.promise = new Promise((resolve) => {
-    video.onloadeddata = () => {
-      rec.ready = true;
-      rec.duration = video.duration || 0;
-      video.play().catch(() => {});
-      resolve(rec);
-    };
-    video.onerror = () => resolve(rec);
-  });
-  video.src = rec.blobUrl;
+  const rec = { kind: 'video', src, video, ready: false, duration: 0, blobUrl: null, error: null, keyer: null };
+  rec.promise = (async () => {
+    try {
+      // async blob conversion keeps the UI responsive for big uploads (atob on 100MB+ would freeze it)
+      const b = blob || (await (await fetch(src)).blob());
+      rec.blobUrl = URL.createObjectURL(b);
+    } catch (_) {
+      rec.blobUrl = src;
+    }
+    if (rec.disposed) return rec;
+    await new Promise((resolve) => {
+      video.onloadeddata = () => {
+        rec.ready = true;
+        rec.duration = video.duration || 0;
+        video.play().catch(() => {});
+        resolve();
+      };
+      video.onerror = () => {
+        rec.error = 'Không phát được video này (định dạng/codec không hỗ trợ). Hãy dùng MP4 (H.264) hoặc WebM.';
+        resolve();
+      };
+      video.src = rec.blobUrl;
+    });
+    return rec;
+  })();
   return rec;
 }
 
-function makeRecord(src, mediaType) {
-  if (mediaType === 'video') return loadVideoRecord(src);
+function makeRecord(src, mediaType, blob) {
+  if (mediaType === 'video') return loadVideoRecord(src, blob);
   if (mediaType === 'gif') return loadGifRecord(src);
   return loadImageRecord(src);
 }
 
-/** Start (or reuse) loading `src` under `key`. Returns a promise resolving when ready. */
-export function setImageSrc(key, src, mediaType = 'image') {
+/**
+ * Start (or reuse) loading `src` under `key`. Returns a promise resolving to the record when ready
+ * (`rec.ready` false + `rec.error` on failure). `blob` (optional) is the original File, used for
+ * videos to skip re-decoding the data URL.
+ */
+export function setImageSrc(key, src, mediaType = 'image', blob = null) {
   const e = cache.get(key);
   if (!src) {
     disposeRecord(e);
@@ -110,12 +123,18 @@ export function setImageSrc(key, src, mediaType = 'image') {
   }
   if (e && e.src === src && e.kind === (mediaType === 'gif' ? 'gif' : mediaType === 'video' ? 'video' : 'image')) return e.promise;
   disposeRecord(e);
-  const rec = makeRecord(src, mediaType);
+  const rec = makeRecord(src, mediaType, blob);
   cache.set(key, rec);
   return rec.promise;
 }
 
 function disposeRecord(rec) {
+  if (rec) rec.disposed = true;
+  if (rec?.kind === 'video') {
+    try {
+      rec.video.pause();
+    } catch (_) {}
+  }
   if (rec?.kind === 'video' && rec.blobUrl && rec.blobUrl.startsWith('blob:')) {
     try {
       rec.video.pause();
@@ -130,12 +149,27 @@ export function getImage(key) {
   return e && e.kind === 'image' && e.ready ? e.img : null;
 }
 
-/** A drawable (image | gif frame canvas | video element) for a key at loop time t, or null. */
-export function getDrawable(key, t = 0) {
+/**
+ * A drawable (image | gif frame canvas | video element | chroma-keyed canvas) for a key at loop
+ * time t, or null. `params` are the prop params (video trim + chroma key settings).
+ */
+export function getDrawable(key, t = 0, params = null) {
   const e = cache.get(key);
   if (!e || !e.ready) return null;
   if (e.kind === 'image') return e.img;
-  if (e.kind === 'video') return e.video;
+  if (e.kind === 'video') {
+    const v = e.video;
+    // live preview: keep the freely playing video inside the trimmed segment
+    if (!v.paused && !v.seeking) {
+      const { start, end } = trimRange(params, e.duration || v.duration || 0);
+      if (end > start && (v.currentTime < start - 0.02 || v.currentTime >= end - 0.01)) {
+        try {
+          v.currentTime = start;
+        } catch (_) {}
+      }
+    }
+    return params?.chromaKey ? keyedFrame(e, params) : v;
+  }
   if (e.kind === 'gif') {
     const tt = ((t % e.totalDur) + e.totalDur) % e.totalDur;
     for (const f of e.frames) if (f.end > tt) return f.canvas;
@@ -182,8 +216,10 @@ export async function seekMediaForExport(project, t) {
     if (!rec || rec.kind !== 'video' || !rec.ready) continue;
     const v = rec.video;
     if (!v.paused) v.pause();
-    const dur = rec.duration || v.duration || 0;
-    const target = dur > 0 ? ((t % dur) + dur) % dur : 0;
+    const { start, end } = trimRange(p.params, rec.duration || v.duration || 0);
+    const len = end - start;
+    // stay a hair before `end` so the decoded frame is still inside the segment
+    const target = len > 0 ? Math.min(end - 1e-3, start + (((t % len) + len) % len)) : start;
     if (Math.abs(v.currentTime - target) < 1e-3) continue;
     tasks.push(
       new Promise((resolve) => {
@@ -205,4 +241,153 @@ export async function seekMediaForExport(project, t) {
     );
   }
   await Promise.all(tasks);
+}
+
+/** Resume free playback of every loaded video (an export pauses them to seek frame by frame). */
+export function resumeMediaPlayback() {
+  for (const rec of cache.values()) if (rec.kind === 'video' && rec.ready && rec.video.paused) rec.video.play().catch(() => {});
+}
+
+/** The <video> element of a loaded video key, or null. */
+export function getVideoElement(key) {
+  const e = cache.get(key);
+  return e?.kind === 'video' && e.ready ? e.video : null;
+}
+
+/** Duration (s) of a loaded video key, or 0. */
+export function getMediaDuration(key) {
+  const e = cache.get(key);
+  return e?.kind === 'video' && e.ready ? e.duration || e.video.duration || 0 : 0;
+}
+
+// ------------------------------------------------------------------ video trim
+/** The prop's trimmed segment (params.trimStart / trimEnd, seconds) clamped to the video duration. */
+export function trimRange(params, dur) {
+  if (!(dur > 0)) return { start: 0, end: 0 };
+  let start = Math.max(0, Math.min(dur, +params?.trimStart || 0));
+  let end = params?.trimEnd != null && params.trimEnd !== '' ? Math.max(0, Math.min(dur, +params.trimEnd)) : dur;
+  if (end - start < 0.05) {
+    start = 0;
+    end = dur;
+  }
+  return { start, end };
+}
+
+// ------------------------------------------------------------- chroma key
+export const CHROMA_DEFAULTS = { keyColor: '#00ff00', keySimilarity: 0.45, keySmoothness: 0.12, keySpill: 0.6 };
+const MAX_KEY_DIM = 1280; // keyed frames are processed at most this big (long side)
+
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  const n = m ? parseInt(m[1], 16) : 0x00ff00;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const rgbToHex = (r, g, b) => '#' + [r, g, b].map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
+
+/**
+ * Make pixels close to the key colour transparent, in place (RGBA bytes).
+ * Distance is measured in the CbCr chroma plane (brightness-independent, so shadows on the screen
+ * key out too) as a fraction of the key colour's own saturation, so neutral greys/whites are never
+ * removed while similarity < 1.
+ */
+export function applyChromaKey(data, opts) {
+  const [kr, kg, kb] = hexToRgb(opts.keyColor);
+  const kcb = -0.168736 * kr - 0.331264 * kg + 0.5 * kb;
+  const kcr = 0.5 * kr - 0.418688 * kg - 0.081312 * kb;
+  const kmag = Math.hypot(kcb, kcr) || 1;
+  const sim = Math.max(0, Math.min(1, opts.keySimilarity ?? CHROMA_DEFAULTS.keySimilarity));
+  const smooth = Math.max(0.001, opts.keySmoothness ?? CHROMA_DEFAULTS.keySmoothness);
+  const spill = Math.max(0, Math.min(1, opts.keySpill ?? CHROMA_DEFAULTS.keySpill));
+  // despill acts on the key's dominant channel (green for a green screen)
+  const dom = kg >= kr && kg >= kb ? 1 : kb >= kr ? 2 : 0;
+  const o1 = dom === 0 ? 1 : 0;
+  const o2 = dom === 2 ? 1 : 2;
+  const thr = sim * kmag;
+  const inv = 1 / (kmag * smooth);
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const cb = -0.168736 * r - 0.331264 * g + 0.5 * b - kcb;
+    const cr = 0.5 * r - 0.418688 * g - 0.081312 * b - kcr;
+    const d = Math.sqrt(cb * cb + cr * cr) - thr; // <= 0 → inside the key
+    if (d <= 0) {
+      data[i + 3] = 0;
+      continue;
+    }
+    const a = d * inv;
+    if (a < 1) data[i + 3] = data[i + 3] * Math.pow(a, 1.5);
+    if (spill > 0) {
+      const c = data[i + dom];
+      const lim = Math.max(data[i + o1], data[i + o2]);
+      if (c > lim) data[i + dom] = c - (c - lim) * spill;
+    }
+  }
+}
+
+function keyedFrame(rec, params) {
+  const v = rec.video;
+  const vw = v.videoWidth;
+  const vh = v.videoHeight;
+  if (!vw || !vh) return v;
+  let k = rec.keyer;
+  if (!k) {
+    const canvas = document.createElement('canvas');
+    k = rec.keyer = { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }), stamp: '' };
+  }
+  const stamp = [v.currentTime, params.keyColor, params.keySimilarity, params.keySmoothness, params.keySpill].join('|');
+  // reuse the last keyed frame while the video is still on it (or mid-seek)
+  if (k.stamp && (v.seeking || k.stamp === stamp)) return k.canvas;
+  const sc = Math.min(1, MAX_KEY_DIM / Math.max(vw, vh));
+  const w = Math.max(1, Math.round(vw * sc));
+  const h = Math.max(1, Math.round(vh * sc));
+  if (k.canvas.width !== w || k.canvas.height !== h) {
+    k.canvas.width = w;
+    k.canvas.height = h;
+  }
+  k.ctx.clearRect(0, 0, w, h);
+  k.ctx.drawImage(v, 0, 0, w, h);
+  const img = k.ctx.getImageData(0, 0, w, h);
+  applyChromaKey(img.data, { ...CHROMA_DEFAULTS, ...params });
+  k.ctx.putImageData(img, 0, 0);
+  k.stamp = stamp;
+  return k.canvas;
+}
+
+/**
+ * Look at the border of a video frame: if most of it is green, it's a green-screen clip.
+ * Returns { green, color } where color is the average border green ('#rrggbb').
+ */
+export function detectGreenScreen(source, sw, sh) {
+  const W = 96;
+  const H = Math.max(8, Math.round((W * (sh || 9)) / (sw || 16)));
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0, W, H);
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const band = 3; // px of border sampled
+  let n = 0;
+  let hit = 0;
+  let sr = 0;
+  let sg = 0;
+  let sb = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (x >= band && x < W - band && y >= band && y < H - band) continue;
+      const i = (y * W + x) * 4;
+      const r = d[i];
+      const g = d[i + 1];
+      const b = d[i + 2];
+      n++;
+      if (g > 70 && g > r * 1.3 && g > b * 1.3 && g - Math.max(r, b) > 40) {
+        hit++;
+        sr += r;
+        sg += g;
+        sb += b;
+      }
+    }
+  }
+  return { green: n > 0 && hit / n >= 0.45, color: hit ? rgbToHex(sr / hit, sg / hit, sb / hit) : CHROMA_DEFAULTS.keyColor };
 }
