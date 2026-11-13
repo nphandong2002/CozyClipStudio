@@ -386,14 +386,16 @@ function masterize(out, Ns, mix) {
   return out;
 }
 
-/** Audition one prop's sound alone (one loop) — for the "nghe thử" button. */
+/**
+ * Audition one prop's sound alone (one loop) — for the "nghe thử" button. Independent of the scene
+ * mix (master / props sliders) and of the prop's on/off checkbox: only its own volume counts.
+ */
 export function renderPropAudio(project, prop) {
   const L = project.output.loopSeconds;
   const Ns = Math.round(L * SR);
   const sc = effectiveScene(project, null);
-  const mix = project.mix || {};
-  const layers = propLayers(prop, sc, L).map((ly) => ({ ...ly, gain: ly.gain * (mix.props ?? 1) }));
-  return masterize(mixLayers(layers, Ns), Ns, mix);
+  const layers = propLayers({ ...prop, enabled: true }, sc, L);
+  return masterize(mixLayers(layers, Ns), Ns, {}); // neutral (default) master, not the scene's
 }
 
 /** Audition one character's action sound alone (one loop). */

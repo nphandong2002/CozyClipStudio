@@ -2,11 +2,37 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { renderClipAudio } from '../engine/audio.js';
 import { SR } from '../engine/dsp.js';
 
-/** Audition an arbitrary stereo buffer on demand, looped; toggles off if the same id replays. */
+// ---------------------------------------------------------------- solo bus
+// While any audition plays, the scene preview + background music are muted so you hear it alone.
+const soloOwners = new Set();
+const soloSubs = new Set();
+function setSolo(owner, on) {
+  const before = soloOwners.size > 0;
+  if (on) soloOwners.add(owner);
+  else soloOwners.delete(owner);
+  const after = soloOwners.size > 0;
+  if (before !== after) soloSubs.forEach((f) => f(after));
+}
+/** true while some "nghe thử" audition is playing. */
+export function useAuditionSolo() {
+  const [solo, set] = useState(soloOwners.size > 0);
+  useEffect(() => {
+    soloSubs.add(set);
+    set(soloOwners.size > 0);
+    return () => soloSubs.delete(set);
+  }, []);
+  return solo;
+}
+
+/**
+ * Audition an arbitrary stereo buffer on demand, looped and solo (scene audio is muted meanwhile);
+ * toggles off if the same id replays. refresh() swaps the buffer of the playing id (e.g. volume change).
+ */
 export function useAudition() {
   const ctxRef = useRef(null);
   const srcRef = useRef(null);
   const idRef = useRef(null);
+  const owner = useRef({});
   const [playingId, setPlayingId] = useState(null);
 
   const stop = useCallback(() => {
@@ -18,6 +44,7 @@ export function useAudition() {
     }
     idRef.current = null;
     setPlayingId(null);
+    setSolo(owner.current, false);
   }, []);
 
   const play = useCallback(
@@ -47,11 +74,21 @@ export function useAudition() {
         srcRef.current = src;
         idRef.current = id;
         setPlayingId(id);
+        setSolo(owner.current, true);
       } catch (e) {
         console.warn('Không nghe thử được:', e);
       }
     },
     [stop]
+  );
+
+  const refresh = useCallback(
+    (makeBuffer, id) => {
+      if (idRef.current !== id) return;
+      idRef.current = null; // so play() swaps the buffer instead of toggling off
+      play(makeBuffer, id);
+    },
+    [play]
   );
 
   useEffect(
@@ -61,18 +98,26 @@ export function useAudition() {
           srcRef.current.stop();
         } catch (_) {}
       }
+      setSolo(owner.current, false);
     },
     []
   );
 
-  return { play, stop, playingId };
+  return { play, stop, refresh, playingId };
 }
 
 /** Renders the current clip's audio (same code as export) and loops it. */
-export function useAudioPreview({ project, rig, clip, playing, clock }) {
+export function useAudioPreview({ project, rig, clip, playing, clock, solo = false }) {
   const ctxRef = useRef(null);
   const srcRef = useRef(null);
   const gainRef = useRef(null);
+  const soloRef = useRef(solo);
+  soloRef.current = solo;
+
+  // mute (without stopping) while an audition plays solo
+  useEffect(() => {
+    if (gainRef.current && ctxRef.current) gainRef.current.gain.setTargetAtTime(solo ? 0 : 1, ctxRef.current.currentTime, 0.05);
+  }, [solo]);
 
   // audio depends only on parts of the project that affect sound
   const key = clip
@@ -116,7 +161,7 @@ export function useAudioPreview({ project, rig, clip, playing, clock }) {
       const now = (performance.now() - clock.current.start) / 1000;
       const offset = clip.kind === 'loop' ? now % clip.T : Math.min(now, clip.T - 0.01);
       gainRef.current.gain.setValueAtTime(0, ac.currentTime);
-      gainRef.current.gain.linearRampToValueAtTime(1, ac.currentTime + 0.25);
+      gainRef.current.gain.linearRampToValueAtTime(soloRef.current ? 0 : 1, ac.currentTime + 0.25);
       src.start(0, Math.max(0, offset));
       srcRef.current = src;
     }, 250);
@@ -130,7 +175,7 @@ export function useAudioPreview({ project, rig, clip, playing, clock }) {
 }
 
 /** Loops the user-uploaded background track continuously while playing. */
-export function useBackgroundAudio({ project, playing }) {
+export function useBackgroundAudio({ project, playing, solo = false }) {
   const ctxRef = useRef(null);
   const nodeRef = useRef(null);
   const gainRef = useRef(null);
@@ -138,10 +183,13 @@ export function useBackgroundAudio({ project, playing }) {
   const src = project.audio?.src || null;
   const vol = project.audio?.volume ?? 0.6;
 
-  // live volume / mute
+  const soloRef = useRef(solo);
+  soloRef.current = solo;
+
+  // live volume / mute (also muted while an audition plays solo)
   useEffect(() => {
-    if (gainRef.current && ctxRef.current) gainRef.current.gain.setTargetAtTime(playing ? vol : 0, ctxRef.current.currentTime, 0.1);
-  }, [vol, playing]);
+    if (gainRef.current && ctxRef.current) gainRef.current.gain.setTargetAtTime(playing && !solo ? vol : 0, ctxRef.current.currentTime, 0.05);
+  }, [vol, playing, solo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,7 +224,7 @@ export function useBackgroundAudio({ project, playing }) {
         node.buffer = bufRef.current.buffer;
         node.loop = true;
         node.connect(gainRef.current);
-        gainRef.current.gain.setValueAtTime(vol, ac.currentTime);
+        gainRef.current.gain.setValueAtTime(soloRef.current ? 0 : vol, ac.currentTime);
         node.start();
         nodeRef.current = node;
       } catch (e) {

@@ -5,7 +5,7 @@ import { uid } from '../engine/util.js';
 import { renderPropAudio } from '../engine/audio.js';
 import { windowPoints } from '../engine/scene.js';
 import { useAudition } from './useAudioPreview.js';
-import { setImageSrc, detectGreenScreen, getVideoElement, getMediaDuration, CHROMA_DEFAULTS, trimRange } from '../engine/images.js';
+import { setImageSrc, detectKeyBackground, getVideoElement, getMediaDuration, CHROMA_DEFAULTS, LUMA_DEFAULTS, keyModeOf, trimRange } from '../engine/images.js';
 
 const VIDEO_ERR = 'Không đọc được video (định dạng/codec không hỗ trợ). Hãy dùng MP4 (H.264) hoặc WebM.';
 
@@ -48,16 +48,16 @@ async function probeVideo(file) {
     await meta;
     const duration = isFinite(v.duration) ? v.duration : 0;
     const aspect = (v.videoWidth || 16) / (v.videoHeight || 9);
-    let green = { green: false, color: CHROMA_DEFAULTS.keyColor };
+    let bg = { kind: null, color: CHROMA_DEFAULTS.keyColor };
     try {
       const seeked = waitFor(v, 'seeked', 8000, VIDEO_ERR);
       v.currentTime = Math.min(0.2, duration / 2 || 0);
       await seeked;
-      green = detectGreenScreen(v, v.videoWidth, v.videoHeight);
+      bg = detectKeyBackground(v, v.videoWidth, v.videoHeight);
     } catch (_) {
       // detection is best effort; the video itself loaded fine
     }
-    return { aspect, duration, green };
+    return { aspect, duration, bg };
   } finally {
     v.removeAttribute('src');
     v.load();
@@ -94,10 +94,11 @@ async function loadMediaFile(file, key, onStage) {
       duration: info.duration,
       trimStart: 0,
       trimEnd: null,
-      chromaKey: info.green.green,
-      greenDetected: info.green.green,
+      keyMode: info.bg.kind || 'none',
+      bgDetected: info.bg.kind || 'none',
       ...CHROMA_DEFAULTS,
-      keyColor: info.green.green ? info.green.color : CHROMA_DEFAULTS.keyColor,
+      ...LUMA_DEFAULTS,
+      keyColor: info.bg.kind === 'green' ? info.bg.color : CHROMA_DEFAULTS.keyColor,
     });
   } else {
     aspect = (await probeImage(dataURL)).aspect;
@@ -428,7 +429,7 @@ export function PropsPanel({ project, update, selection, setSelection }) {
           if (!o) return;
           const h = o.params?.natH || 360;
           const keep = { ...(o.params || {}) };
-          for (const k of ['duration', 'trimStart', 'trimEnd', 'chromaKey', 'greenDetected', ...Object.keys(CHROMA_DEFAULTS)]) delete keep[k];
+          for (const k of ['duration', 'trimStart', 'trimEnd', 'chromaKey', 'greenDetected', 'keyMode', 'bgDetected', ...Object.keys(CHROMA_DEFAULTS), ...Object.keys(LUMA_DEFAULTS)]) delete keep[k];
           o.params = { ...keep, src, mediaType, natH: h, natW: Math.round(h * aspect), ...extra };
         }),
       () => setImageSrc('prop:' + id, old.src, old.mediaType || 'image')
@@ -444,6 +445,14 @@ export function PropsPanel({ project, update, selection, setSelection }) {
     return () => clearInterval(t);
   }, [isVideo, vidDur]);
   const def = sel && PROPS[sel.type];
+  // while auditioning this prop, re-render its sound when its own settings change (volume, style…)
+  const auditionKey = sel && def?.sound ? JSON.stringify([sel.id, sel.volume, sel.params, project.scene.weather, project.output.loopSeconds]) : '';
+  React.useEffect(() => {
+    if (!sel || audition.playingId !== 'prop:' + sel.id) return;
+    const t = setTimeout(() => audition.refresh(() => renderPropAudio(project, sel), 'prop:' + sel.id), 150);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auditionKey]);
   return (
     <div>
       <h3>Thêm vật thể</h3>
@@ -506,6 +515,9 @@ export function PropsPanel({ project, update, selection, setSelection }) {
                   {audition.playingId === 'prop:' + sel.id ? '⏹ Dừng nghe' : '▶ Nghe thử âm thanh'}
                 </button>
               </div>
+              <small className="muted block" style={{ marginBottom: 8 }}>
+                Nghe riêng vật thể này: tạm tắt tiếng cảnh & nhạc nền, không tính âm lượng chung — chỉ theo âm lượng bên dưới.
+              </small>
               <Field label="Âm lượng của vật thể">
                 <Range value={sel.volume ?? 1} min={0} max={2} step={0.05} onChange={(v) => setP('volume', v)} fmt={pct} />
               </Field>
@@ -582,10 +594,12 @@ function VideoMediaEditor({ sel, setParams, dur, loopSeconds }) {
   const redetect = () => {
     const v = getVideoElement(key);
     if (!v) return;
-    const r = detectGreenScreen(v, v.videoWidth, v.videoHeight);
-    setParams(r.green ? { keyColor: r.color, chromaKey: true, greenDetected: true } : { greenDetected: false });
+    const r = detectKeyBackground(v, v.videoWidth, v.videoHeight);
+    setParams({ keyMode: r.kind || 'none', bgDetected: r.kind || 'none', chromaKey: false, ...(r.kind === 'green' ? { keyColor: r.color } : {}) });
   };
-  const ck = !!prm.chromaKey;
+  const mode = keyModeOf(prm);
+  const detected = prm.bgDetected || (prm.greenDetected != null ? (prm.greenDetected ? 'green' : 'none') : null);
+  const detectedMsg = { green: '✓ Đã phát hiện nền xanh lá — tự động bật.', black: '✓ Đã phát hiện nền đen (lửa/khói/ánh sáng) — tự động bật.', none: 'Không phát hiện nền xanh hay nền đen ở viền video.' }[detected];
   return (
     <>
       <h3>Cắt phân đoạn video</h3>
@@ -615,22 +629,42 @@ function VideoMediaEditor({ sel, setParams, dur, loopSeconds }) {
       ) : (
         <small className="muted">Đang tải video…</small>
       )}
-      <h3>Xoá nền xanh (chroma key)</h3>
-      <label className="check">
-        <input type="checkbox" checked={ck} onChange={(e) => setParams({ chromaKey: e.target.checked })} /> Làm trong suốt nền xanh lá
-      </label>
-      {prm.greenDetected != null && (
-        <small className="muted block">{prm.greenDetected ? '✓ Đã phát hiện nền xanh — tự động bật.' : 'Không phát hiện nền xanh ở viền video.'}</small>
+      <h3>Xoá nền video</h3>
+      <Field label="Loại nền">
+        <div className="row" style={{ margin: 0 }}>
+          <Select
+            value={mode}
+            options={[
+              ['none', 'Không xoá nền'],
+              ['green', 'Nền xanh lá (chroma key)'],
+              ['black', 'Nền đen (lửa, khói, tia sáng…)'],
+            ]}
+            onChange={(m) => setParams({ keyMode: m, chromaKey: false })}
+          />
+          <button onClick={redetect} title="Dò lại loại nền từ viền khung hình hiện tại">
+            Tự dò
+          </button>
+        </div>
+      </Field>
+      {detectedMsg && <small className="muted block">{detectedMsg}</small>}
+      {mode === 'black' && (
+        <>
+          <small className="muted block" style={{ marginBottom: 8 }}>
+            Vùng đen thành trong suốt, chỗ sáng (lửa) giữ nguyên, khói mờ thành bán trong suốt — giống chế độ hoà trộn Screen.
+          </small>
+          <Field label="Ngưỡng nền đen" hint="Tăng nếu còn thấy viền/khung xám đục quanh vật thể.">
+            <Range value={prm.lumaThreshold ?? LUMA_DEFAULTS.lumaThreshold} min={0} max={0.4} step={0.01} onChange={(v) => setParams({ lumaThreshold: v })} fmt={pct} />
+          </Field>
+          <Field label="Độ đậm" hint="Tăng để khói/lửa mờ đặc hơn, giảm để trong hơn.">
+            <Range value={prm.lumaBoost ?? LUMA_DEFAULTS.lumaBoost} min={0.5} max={3} step={0.05} onChange={(v) => setParams({ lumaBoost: v })} fmt={(v) => v.toFixed(2) + '×'} />
+          </Field>
+          <button onClick={() => setParams({ ...LUMA_DEFAULTS })}>Đặt lại thông số</button>
+        </>
       )}
-      {ck && (
+      {mode === 'green' && (
         <>
           <Field label="Màu nền cần xoá">
-            <div className="row" style={{ margin: 0 }}>
-              <input type="color" value={prm.keyColor || CHROMA_DEFAULTS.keyColor} onChange={(e) => setParams({ keyColor: e.target.value })} />
-              <button onClick={redetect} title="Lấy màu xanh ở viền khung hình hiện tại">
-                Tự dò màu
-              </button>
-            </div>
+            <input type="color" value={prm.keyColor || CHROMA_DEFAULTS.keyColor} onChange={(e) => setParams({ keyColor: e.target.value })} />
           </Field>
           <Field label="Độ nhạy" hint="Cao hơn = xoá rộng hơn (kể cả vùng xanh tối/bóng đổ).">
             <Range value={prm.keySimilarity ?? CHROMA_DEFAULTS.keySimilarity} min={0.05} max={0.95} step={0.01} onChange={(v) => setParams({ keySimilarity: v })} fmt={pct} />

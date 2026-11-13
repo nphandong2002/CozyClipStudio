@@ -6,7 +6,7 @@ import Stage from './ui/Stage.jsx';
 import Timeline from './ui/Timeline.jsx';
 import { ScenePanel, PropsPanel, CharacterPanel } from './ui/panels.jsx';
 import ExportDialog from './ui/ExportDialog.jsx';
-import { useAudioPreview, useBackgroundAudio } from './ui/useAudioPreview.js';
+import { useAudioPreview, useBackgroundAudio, useAuditionSolo } from './ui/useAudioPreview.js';
 import { useHistory } from './ui/useHistory.js';
 import { preloadProject } from './engine/images.js';
 import { uid } from './engine/util.js';
@@ -106,8 +106,9 @@ export default function App() {
     clock.current = { start: performance.now(), pausedAt: 0 };
   }, [activeClip?.id]);
 
-  useAudioPreview({ project, rig, clip: activeClip, playing: playing && !muted, clock });
-  useBackgroundAudio({ project, playing: playing && !muted });
+  const solo = useAuditionSolo(); // a "nghe thử" is playing → scene audio muted meanwhile
+  useAudioPreview({ project, rig, clip: activeClip, playing: playing && !muted, clock, solo });
+  useBackgroundAudio({ project, playing: playing && !muted, solo });
 
   // preload user-uploaded images (object props + background)
   useEffect(() => {

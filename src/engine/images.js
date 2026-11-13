@@ -168,7 +168,8 @@ export function getDrawable(key, t = 0, params = null) {
         } catch (_) {}
       }
     }
-    return params?.chromaKey ? keyedFrame(e, params) : v;
+    const mode = keyModeOf(params);
+    return mode !== 'none' ? keyedFrame(e, params, mode) : v;
   }
   if (e.kind === 'gif') {
     const tt = ((t % e.totalDur) + e.totalDur) % e.totalDur;
@@ -275,6 +276,42 @@ export function trimRange(params, dur) {
 
 // ------------------------------------------------------------- chroma key
 export const CHROMA_DEFAULTS = { keyColor: '#00ff00', keySimilarity: 0.45, keySmoothness: 0.12, keySpill: 0.6 };
+export const LUMA_DEFAULTS = { lumaThreshold: 0.06, lumaBoost: 1 };
+
+/** Background removal mode of a video prop: 'none' | 'green' (chroma key) | 'black' (fire/smoke/light on black). */
+export function keyModeOf(params) {
+  if (!params) return 'none';
+  if (params.keyMode) return params.keyMode;
+  return params.chromaKey ? 'green' : 'none'; // projects saved before keyMode existed
+}
+
+/**
+ * Remove a black background, in place (RGBA bytes) — for fire, smoke, sparks, light leaks…
+ * Alpha comes from brightness and the colour is "unmultiplied", so drawn over any scene the result
+ * matches a Screen blend: black vanishes, bright flames stay opaque, smoke becomes see-through.
+ * lumaThreshold cuts near-black noise; lumaBoost > 1 makes faint parts more solid.
+ */
+export function applyLumaKey(data, opts) {
+  const thr = Math.max(0, Math.min(0.9, opts.lumaThreshold ?? LUMA_DEFAULTS.lumaThreshold)) * 255;
+  const boost = Math.max(0.1, opts.lumaBoost ?? LUMA_DEFAULTS.lumaBoost);
+  const k = 255 / (255 - thr);
+  for (let i = 0; i < data.length; i += 4) {
+    const r = Math.max(0, data[i] - thr) * k;
+    const g = Math.max(0, data[i + 1] - thr) * k;
+    const b = Math.max(0, data[i + 2] - thr) * k;
+    const m = r > g ? (r > b ? r : b) : g > b ? g : b;
+    if (m <= 0) {
+      data[i + 3] = 0;
+      continue;
+    }
+    const a = Math.min(255, m * boost); // 0..255
+    const s = 255 / a;
+    data[i] = r * s;
+    data[i + 1] = g * s;
+    data[i + 2] = b * s;
+    data[i + 3] = (data[i + 3] * a) / 255;
+  }
+}
 const MAX_KEY_DIM = 1280; // keyed frames are processed at most this big (long side)
 
 function hexToRgb(hex) {
@@ -325,7 +362,7 @@ export function applyChromaKey(data, opts) {
   }
 }
 
-function keyedFrame(rec, params) {
+function keyedFrame(rec, params, mode) {
   const v = rec.video;
   const vw = v.videoWidth;
   const vh = v.videoHeight;
@@ -335,7 +372,7 @@ function keyedFrame(rec, params) {
     const canvas = document.createElement('canvas');
     k = rec.keyer = { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }), stamp: '' };
   }
-  const stamp = [v.currentTime, params.keyColor, params.keySimilarity, params.keySmoothness, params.keySpill].join('|');
+  const stamp = [v.currentTime, mode, params.keyColor, params.keySimilarity, params.keySmoothness, params.keySpill, params.lumaThreshold, params.lumaBoost].join('|');
   // reuse the last keyed frame while the video is still on it (or mid-seek)
   if (k.stamp && (v.seeking || k.stamp === stamp)) return k.canvas;
   const sc = Math.min(1, MAX_KEY_DIM / Math.max(vw, vh));
@@ -348,17 +385,19 @@ function keyedFrame(rec, params) {
   k.ctx.clearRect(0, 0, w, h);
   k.ctx.drawImage(v, 0, 0, w, h);
   const img = k.ctx.getImageData(0, 0, w, h);
-  applyChromaKey(img.data, { ...CHROMA_DEFAULTS, ...params });
+  if (mode === 'black') applyLumaKey(img.data, { ...LUMA_DEFAULTS, ...params });
+  else applyChromaKey(img.data, { ...CHROMA_DEFAULTS, ...params });
   k.ctx.putImageData(img, 0, 0);
   k.stamp = stamp;
   return k.canvas;
 }
 
 /**
- * Look at the border of a video frame: if most of it is green, it's a green-screen clip.
- * Returns { green, color } where color is the average border green ('#rrggbb').
+ * Look at the border of a video frame to guess its background: mostly green → green screen,
+ * (almost) all black → fire/smoke/light footage on black.
+ * Returns { kind: 'green' | 'black' | null, color } (color = average border green, '#rrggbb').
  */
-export function detectGreenScreen(source, sw, sh) {
+export function detectKeyBackground(source, sw, sh) {
   const W = 96;
   const H = Math.max(8, Math.round((W * (sh || 9)) / (sw || 16)));
   const c = document.createElement('canvas');
@@ -373,6 +412,7 @@ export function detectGreenScreen(source, sw, sh) {
   let sr = 0;
   let sg = 0;
   let sb = 0;
+  let dark = 0;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       if (x >= band && x < W - band && y >= band && y < H - band) continue;
@@ -381,6 +421,7 @@ export function detectGreenScreen(source, sw, sh) {
       const g = d[i + 1];
       const b = d[i + 2];
       n++;
+      if (Math.max(r, g, b) < 32) dark++;
       if (g > 70 && g > r * 1.3 && g > b * 1.3 && g - Math.max(r, b) > 40) {
         hit++;
         sr += r;
@@ -389,5 +430,7 @@ export function detectGreenScreen(source, sw, sh) {
       }
     }
   }
-  return { green: n > 0 && hit / n >= 0.45, color: hit ? rgbToHex(sr / hit, sg / hit, sb / hit) : CHROMA_DEFAULTS.keyColor };
+  const color = hit ? rgbToHex(sr / hit, sg / hit, sb / hit) : CHROMA_DEFAULTS.keyColor;
+  const kind = n > 0 && hit / n >= 0.45 ? 'green' : n > 0 && dark / n >= 0.92 ? 'black' : null;
+  return { kind, color };
 }
