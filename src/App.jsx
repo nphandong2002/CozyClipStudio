@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cozyRoomPreset, campingPreset, migrateProject } from './engine/presets.js';
 import { loadRigFromBundle, loadSampleBundle } from './engine/loadSpine.js';
-import { buildPlan, fmtDuration } from './engine/scene.js';
+import { buildPlan, fmtDuration, windowPoints } from './engine/scene.js';
 import Stage from './ui/Stage.jsx';
 import Timeline from './ui/Timeline.jsx';
 import { ScenePanel, PropsPanel, CharacterPanel } from './ui/panels.jsx';
@@ -205,8 +205,12 @@ export default function App() {
       update((p) => {
         const w = (p.scene.windows || []).find((x) => x.id === selection.id);
         if (w) {
-          w.x = Math.round((w.x || 0) + dx);
-          w.y = Math.round((w.y || 0) + dy);
+          w.points = windowPoints(w).map((pt) => ({ x: Math.round(pt.x + dx), y: Math.round(pt.y + dy) }));
+          delete w.x;
+          delete w.y;
+          delete w.w;
+          delete w.h;
+          delete w.rotate;
         }
       }, 'nudge');
     }

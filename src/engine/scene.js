@@ -1,7 +1,7 @@
 // Frame composition + timeline planning.
 import { DESIGN_W, DESIGN_H, effectiveScene, lerp, smooth, hashStr } from './util.js';
 import { drawIndoorBackground, drawOutdoorBackground, drawPrecip, drawLighting, drawDust, drawVignette } from './world.js';
-import { drawProp, propLights, drawWindowView } from './props.js';
+import { drawProp, propLights, drawWindowQuad } from './props.js';
 import { getImage } from './images.js';
 
 export const WALK_SPEED = 170; // design px per second at character scale 1.6
@@ -22,7 +22,7 @@ export function renderFrame(ctx, project, rig, state) {
 
   const bgImg = project.scene.backgroundImage ? getImage('bg') : null;
   if (bgImg) {
-    drawBackground(ctx, bgImg, DESIGN_W, DESIGN_H, project.scene.backgroundFrame);
+    drawBackground(ctx, bgImg, DESIGN_W, DESIGN_H);
     if (!indoor) drawPrecip(ctx, 0, 0, DESIGN_W, DESIGN_H, env, { scale: 0.6, density: 0.8, seed: 5 });
   } else if (indoor) {
     drawIndoorBackground(ctx, env, project.scene);
@@ -31,8 +31,8 @@ export function renderFrame(ctx, project, rig, state) {
     drawPrecip(ctx, 0, 0, DESIGN_W, DESIGN_H, env, { scale: 0.6, density: 0.8, seed: 5 });
   }
 
-  // user-defined "live window" regions over the background (sky/weather shows through)
-  for (const win of project.scene.windows || []) drawWindowView(ctx, win.x, win.y, win.w, win.h, env, (hashStr(win.id) % 9973) + 1);
+  // user-defined "live window" regions (free 4-corner quad over the background)
+  for (const win of project.scene.windows || []) drawWindowQuad(ctx, windowPoints(win), env, (hashStr(win.id) % 9973) + 1);
 
   const props = project.props.filter((p) => p.enabled !== false);
   const back = props.filter((p) => (p.layer || 'back') === 'back');
@@ -109,6 +109,26 @@ export function castEntry(seg, charId) {
 
 function charSeed(id) {
   return (hashStr(String(id)) % 9973) + 1;
+}
+
+/** A window region's 4 corner points [TL,TR,BR,BL], tolerant of the legacy
+ *  rect+rotate shape (converted on the fly). */
+export function windowPoints(win) {
+  if (Array.isArray(win.points) && win.points.length === 4) return win.points;
+  const x = win.x ?? 760;
+  const y = win.y ?? 300;
+  const w = win.w ?? 520;
+  const h = win.h ?? 380;
+  const rot = ((win.rotate || 0) * Math.PI) / 180;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]].map(([px, py]) => {
+    const dx = px - cx;
+    const dy = py - cy;
+    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+  });
 }
 
 const MOVE_EPS = 2; // px: below this, a character is considered standing still between segments

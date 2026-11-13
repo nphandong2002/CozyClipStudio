@@ -26,7 +26,8 @@ npm run dev
 
 ### Tải lên của riêng bạn
 - **Ảnh / GIF / video làm vật thể**: tab *Vật thể* → **Tải ảnh / GIF / video làm vật thể**. Thành một vật thể như mọi cái khác: kéo thả, chỉnh kích thước, lớp nền/tiền cảnh, làm mờ, lật. GIF và video **chạy động** (xem trước phát mượt); nút *Đổi…* để thay. Khi xuất, video được lấy từng khung (chậm hơn chút) — nên dùng clip lặp liền mạch và để độ dài vòng lặp là bội số độ dài clip.
-- **Ảnh nền toàn cảnh + khung cửa sổ**: tab *Cảnh* → **Tải ảnh nền**. Chọn vùng hiển thị (khung cửa sổ): **kéo ảnh nền trên khung hình** để dời, hoặc dùng thanh **Phóng to / Dịch ngang / Dịch dọc / Xoay (chéo)**; nút *Đặt lại khung*. Nhân vật, vật thể, thời tiết, ánh sáng vẫn vẽ đè lên.
+- **Ảnh nền toàn cảnh**: tab *Cảnh* → **Tải ảnh nền**. Ảnh phủ kín khung thay cho nền vẽ code; khi có ảnh nền, các tuỳ chọn màu tường/sàn & đường sàn tự ẩn. Nhân vật, vật thể, thời tiết, ánh sáng vẫn vẽ đè lên.
+- **Cửa sổ động**: tab *Cảnh* → *Cửa sổ động* → **+ Thêm vùng cửa sổ**. Khoanh một vùng để app vẽ bầu trời + mưa/tuyết/sấm động vào đó — biến ô cửa tĩnh trong ảnh nền thành cửa sổ "sống". Vùng là một **tứ giác 4 góc tự do**: kéo từng góc để tạo hình bất kỳ (nghiêng / méo / to nhỏ), kéo trong lòng để di chuyển cả vùng; con trỏ chuột đổi hình theo vùng, nút *Đặt lại hình chữ nhật* để về ô vuông. Nội dung theo Thời tiết + Thời điểm của cảnh.
 - **Nhạc / âm thanh nền**: tab *Cảnh* → **Tải nhạc nền** (mp3/wav). Nghe thử ngay (phát lặp), chỉnh âm lượng riêng; khi xuất, nhạc được ffmpeg lặp đủ độ dài và trộn cùng tiếng ASMR tổng hợp.
 
 > Ảnh/nhạc được nhúng thẳng vào file dự án `.cozy.json` (dạng data URL) nên mở ở máy khác vẫn đủ. Dự án có nhiều ảnh/nhạc lớn có thể vượt giới hạn tự lưu nháp của trình duyệt — cứ **Lưu** ra file để chắc chắn.

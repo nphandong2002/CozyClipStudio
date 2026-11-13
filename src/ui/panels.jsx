@@ -3,6 +3,7 @@ import { PROPS } from '../engine/props.js';
 import { TIMES, WEATHERS } from '../engine/world.js';
 import { uid } from '../engine/util.js';
 import { renderPropAudio } from '../engine/audio.js';
+import { windowPoints } from '../engine/scene.js';
 import { useAudition } from './useAudioPreview.js';
 
 /** Detect media kind (image | gif | video) and natural aspect ratio of a picked file. */
@@ -75,12 +76,37 @@ export function ScenePanel({ project, update, presets, selection, setSelection }
   const s = project.scene;
   const set = (k, v) => update((p) => (p.scene[k] = v));
   const selWin = selection?.kind === 'window' ? (s.windows || []).find((w) => w.id === selection.id) : null;
-  const setWin = (k, v) => update((p) => (p.scene.windows.find((w) => w.id === selWin.id)[k] = Math.round(v)));
+  const winSize = (w) => {
+    const pts = windowPoints(w);
+    const xs = pts.map((q) => q.x);
+    const ys = pts.map((q) => q.y);
+    return Math.round(Math.max(...xs) - Math.min(...xs)) + '×' + Math.round(Math.max(...ys) - Math.min(...ys));
+  };
   const addWindow = () => {
     const id = uid('win');
-    update((p) => ((p.scene.windows = p.scene.windows || []), p.scene.windows.push({ id, x: 700, y: 280, w: 520, h: 380 })));
+    update((p) => {
+      p.scene.windows = p.scene.windows || [];
+      p.scene.windows.push({ id, points: [{ x: 700, y: 280 }, { x: 1220, y: 280 }, { x: 1220, y: 660 }, { x: 700, y: 660 }] });
+    });
     setSelection?.({ kind: 'window', id });
   };
+  const resetWinRect = () =>
+    update((p) => {
+      const w = p.scene.windows.find((x) => x.id === selWin.id);
+      const pts = windowPoints(w);
+      const xs = pts.map((q) => q.x);
+      const ys = pts.map((q) => q.y);
+      const minx = Math.min(...xs);
+      const maxx = Math.max(...xs);
+      const miny = Math.min(...ys);
+      const maxy = Math.max(...ys);
+      w.points = [{ x: minx, y: miny }, { x: maxx, y: miny }, { x: maxx, y: maxy }, { x: minx, y: maxy }];
+      delete w.x;
+      delete w.y;
+      delete w.w;
+      delete w.h;
+      delete w.rotate;
+    });
   const mix = project.mix || {};
   const setMix = (k, v) => update((p) => ((p.mix = p.mix || {}), (p.mix[k] = v)));
   const out = project.output;
@@ -101,23 +127,29 @@ export function ScenePanel({ project, update, presets, selection, setSelection }
       <Field label="Thời tiết" hint={s.type === 'indoor' ? 'Trong nhà: thấy qua cửa sổ, tiếng bị lọc trầm hơn' : 'Ngoài trời: mưa/tuyết phủ cả cảnh'}>
         <Select value={s.weather} options={Object.entries(WEATHERS)} onChange={(v) => set('weather', v)} />
       </Field>
-      {s.type === 'indoor' ? (
-        <div className="row">
-          <Field label="Màu tường">
-            <input type="color" value={s.wallColor || '#c99a76'} onChange={(e) => set('wallColor', e.target.value)} />
-          </Field>
-          <Field label="Màu sàn">
-            <input type="color" value={s.floorColor || '#7a4e33'} onChange={(e) => set('floorColor', e.target.value)} />
-          </Field>
-        </div>
+      {s.backgroundImage ? (
+        <p className="muted small">Đang dùng ảnh nền — màu tường/sàn & đường sàn bị ẩn (ảnh thay thế bối cảnh vẽ bằng code).</p>
       ) : (
-        <Field label="Màu đất/cỏ">
-          <input type="color" value={s.groundColor || '#6e9a4f'} onChange={(e) => set('groundColor', e.target.value)} />
-        </Field>
+        <>
+          {s.type === 'indoor' ? (
+            <div className="row">
+              <Field label="Màu tường">
+                <input type="color" value={s.wallColor || '#c99a76'} onChange={(e) => set('wallColor', e.target.value)} />
+              </Field>
+              <Field label="Màu sàn">
+                <input type="color" value={s.floorColor || '#7a4e33'} onChange={(e) => set('floorColor', e.target.value)} />
+              </Field>
+            </div>
+          ) : (
+            <Field label="Màu đất/cỏ">
+              <input type="color" value={s.groundColor || '#6e9a4f'} onChange={(e) => set('groundColor', e.target.value)} />
+            </Field>
+          )}
+          <Field label="Đường sàn / chân trời">
+            <Range value={s.floorLevel ?? 0.74} min={0.55} max={0.9} step={0.01} onChange={(v) => set('floorLevel', v)} fmt={pct} />
+          </Field>
+        </>
       )}
-      <Field label="Đường sàn / chân trời">
-        <Range value={s.floorLevel ?? 0.74} min={0.55} max={0.9} step={0.01} onChange={(v) => set('floorLevel', v)} fmt={pct} />
-      </Field>
       <Field label="Viền tối (vignette)">
         <Range value={s.vignette ?? 0.45} min={0} max={0.9} step={0.05} onChange={(v) => set('vignette', v)} fmt={pct} />
       </Field>
@@ -133,69 +165,34 @@ export function ScenePanel({ project, update, presets, selection, setSelection }
           )}
         </div>
       </Field>
-      {s.backgroundImage &&
-        (() => {
-          const fr = s.backgroundFrame || {};
-          const setFrame = (k, v) => update((p) => (p.scene.backgroundFrame = { x: 0.5, y: 0.5, zoom: 1, rotate: 0, ...(p.scene.backgroundFrame || {}), [k]: v }));
-          return (
-            <div className="editor">
-              <p className="muted small">Khung cửa sổ: kéo ảnh nền trên khung hình để chọn vùng, hoặc chỉnh dưới đây.</p>
-              <Field label="Phóng to">
-                <Range value={fr.zoom ?? 1} min={1} max={4} step={0.05} onChange={(v) => setFrame('zoom', v)} fmt={(v) => v.toFixed(2) + '×'} />
-              </Field>
-              <Field label="Dịch ngang">
-                <Range value={fr.x ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => setFrame('x', v)} fmt={pct} />
-              </Field>
-              <Field label="Dịch dọc">
-                <Range value={fr.y ?? 0.5} min={0} max={1} step={0.01} onChange={(v) => setFrame('y', v)} fmt={pct} />
-              </Field>
-              <Field label="Xoay / chéo">
-                <Range value={fr.rotate ?? 0} min={-45} max={45} step={1} onChange={(v) => setFrame('rotate', v)} fmt={(v) => v + '°'} />
-              </Field>
-              <button onClick={() => update((p) => (p.scene.backgroundFrame = { x: 0.5, y: 0.5, zoom: 1, rotate: 0 }))}>Đặt lại khung</button>
-            </div>
-          );
-        })()}
       <h3>Cửa sổ động (trời / thời tiết)</h3>
-      <p className="muted small">Khoanh một vùng để vẽ bầu trời + mưa/tuyết/sấm động vào đó — đặt chồng lên ô cửa trong ảnh nền để nó "sống". Kéo để di chuyển, kéo góc vàng để đổi kích thước.</p>
+      <p className="muted small">Khoanh một vùng để vẽ bầu trời + mưa/tuyết/sấm động vào đó — đặt chồng lên ô cửa trong ảnh nền để nó "sống". Kéo 4 góc để tạo hình bất kỳ (nghiêng/méo/to nhỏ); kéo trong lòng để di chuyển.</p>
       <button onClick={addWindow}>+ Thêm vùng cửa sổ</button>
       {(s.windows || []).length > 0 && (
         <ul className="list">
           {(s.windows || []).map((w, i) => (
             <li key={w.id} className={selWin?.id === w.id ? 'on' : ''} onClick={() => setSelection?.({ kind: 'window', id: w.id })}>
               <span className="grow">🪟 Cửa sổ {i + 1}</span>
-              <span className="badge">{w.w}×{w.h}</span>
+              <span className="badge">{winSize(w)}</span>
             </li>
           ))}
         </ul>
       )}
       {selWin && (
         <div className="editor">
+          <p className="muted small">Kéo 4 góc vàng trên khung hình để tạo hình bất kỳ (nghiêng, méo, to nhỏ tuỳ ý). Kéo trong lòng vùng để di chuyển cả 4 góc.</p>
           <div className="row">
-            <Field label="X">
-              <input type="number" value={selWin.x} onChange={(e) => setWin('x', +e.target.value)} />
-            </Field>
-            <Field label="Y">
-              <input type="number" value={selWin.y} onChange={(e) => setWin('y', +e.target.value)} />
-            </Field>
+            <button onClick={resetWinRect}>Đặt lại hình chữ nhật</button>
+            <button
+              className="danger"
+              onClick={() => {
+                update((p) => (p.scene.windows = (p.scene.windows || []).filter((w) => w.id !== selWin.id)));
+                setSelection?.(null);
+              }}
+            >
+              Xoá vùng
+            </button>
           </div>
-          <div className="row">
-            <Field label="Rộng">
-              <input type="number" value={selWin.w} onChange={(e) => setWin('w', Math.max(40, +e.target.value))} />
-            </Field>
-            <Field label="Cao">
-              <input type="number" value={selWin.h} onChange={(e) => setWin('h', Math.max(40, +e.target.value))} />
-            </Field>
-          </div>
-          <button
-            className="danger"
-            onClick={() => {
-              update((p) => (p.scene.windows = (p.scene.windows || []).filter((w) => w.id !== selWin.id)));
-              setSelection?.(null);
-            }}
-          >
-            Xoá vùng cửa sổ
-          </button>
         </div>
       )}
 

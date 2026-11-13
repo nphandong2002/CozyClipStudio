@@ -8,6 +8,22 @@ echo   CozyClip Studio
 echo ============================================
 echo.
 
+where git >nul 2>nul
+if errorlevel 1 (
+  echo [i] Khong tim thay git - bo qua cap nhat code.
+) else (
+  if exist ".git" (
+    echo [*] Dang keo code moi nhat (git pull)...
+    git pull
+    if errorlevel 1 (
+      echo [!] git pull khong thanh cong - bo qua, dung code hien co.
+    )
+  ) else (
+    echo [i] Thu muc nay khong phai repo git - bo qua cap nhat.
+  )
+)
+echo.
+
 where node >nul 2>nul
 if errorlevel 1 (
   echo [X] Chua cai Node.js. Hay cai Node.js 20+ tai https://nodejs.org roi chay lai.

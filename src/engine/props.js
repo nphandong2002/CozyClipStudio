@@ -65,16 +65,9 @@ function logs(ctx, w) {
 
 const fireFlicker = (env, seed) => 0.85 + 0.15 * pnoise(env, 3, seed);
 
-/**
- * Draw the live "outside view" (sky + precipitation + lightning + rain on glass + sheen)
- * clipped to a rectangle — no frame/curtains. Reused by the window prop and by
- * user-defined window regions placed over a background photo.
- */
-export function drawWindowView(ctx, x, y, w, h, env, seed = 8) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
+/** The live "outside view" (sky + precipitation + lightning + rain on glass + sheen)
+ *  painted over a rectangle. No clip here — callers clip to a rect or a polygon first. */
+function drawSkyView(ctx, x, y, w, h, env, seed = 8) {
   drawSky(ctx, x, y, w, h, env, { seed: 2, sunX: 0.7 });
   drawPrecip(ctx, x, y, w, h, env, { scale: 0.7, density: 1.4, seed: 4 });
   const f = lightningFlash(env);
@@ -117,6 +110,35 @@ export function drawWindowView(ctx, x, y, w, h, env, seed = 8) {
   sg.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = sg;
   ctx.fillRect(x, y, w, h);
+}
+
+/** Live window view clipped to a rectangle (used by the window prop). */
+export function drawWindowView(ctx, x, y, w, h, env, seed = 8) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  drawSkyView(ctx, x, y, w, h, env, seed);
+  ctx.restore();
+}
+
+/** Live window view clipped to an arbitrary 4-point polygon (user window regions).
+ *  The sky/weather stay upright and are simply clipped to the quad outline. */
+export function drawWindowQuad(ctx, points, env, seed = 8) {
+  if (!points || points.length < 3) return;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  ctx.closePath();
+  ctx.clip();
+  drawSkyView(ctx, minX, minY, maxX - minX, maxY - minY, env, seed);
   ctx.restore();
 }
 
