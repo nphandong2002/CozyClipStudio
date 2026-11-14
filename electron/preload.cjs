@@ -19,7 +19,16 @@ contextBridge.exposeInMainWorld('api', {
   cancelExport: () => ipcRenderer.invoke('export:cancel'),
   showInFolder: (p) => ipcRenderer.invoke('shell:show', p),
   // convert a picked video File (by its path on disk, or its bytes) into a playable video
-  convertVideo: async (file, onProgress) => {
+  // duration (s) of a picked video, read by ffmpeg from its path on disk; null if unknown
+  probeVideoFile: async (file) => {
+    try {
+      const p = webUtils.getPathForFile(file);
+      return p ? await ipcRenderer.invoke('media:probe', p) : null;
+    } catch (_) {
+      return null;
+    }
+  },
+  convertVideo: async (file, onProgress, trim) => {
     let p = '';
     try {
       p = webUtils.getPathForFile(file);
@@ -27,7 +36,7 @@ contextBridge.exposeInMainWorld('api', {
     const h = (_e, v) => onProgress && onProgress(v);
     ipcRenderer.on('media:convertProgress', h);
     try {
-      return await ipcRenderer.invoke('media:convert', p ? { path: p } : { bytes: new Uint8Array(await file.arrayBuffer()), name: file.name });
+      return await ipcRenderer.invoke('media:convert', p ? { path: p } : { bytes: new Uint8Array(await file.arrayBuffer()), name: file.name }, trim);
     } finally {
       ipcRenderer.removeListener('media:convertProgress', h);
     }

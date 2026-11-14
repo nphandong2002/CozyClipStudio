@@ -36,10 +36,10 @@ async function probe(input) {
 }
 
 /**
- * src: { path } or { bytes, name }. onProgress(0..1).
+ * src: { path } or { bytes, name }. onProgress(0..1). trim: { start, end } seconds (optional) - cut before loading.
  * Resolves { bytes: Buffer, mime, ext, alpha, mode }.
  */
-async function convertVideo(src, onProgress = () => {}) {
+async function convertVideo(src, onProgress = () => {}, trim = null) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cozyclip-media-'));
   try {
     let input = src.path;
@@ -49,13 +49,18 @@ async function convertVideo(src, onProgress = () => {}) {
     }
     const info = await probe(input);
     const alpha = ALPHA_PIX.test(info.pix);
+    const tStart = trim && trim.start > 0 ? +trim.start : 0;
+    const tEnd = trim && trim.end > tStart ? +trim.end : 0;
+    const trimmed = tStart > 0 || (tEnd > 0 && (!info.duration || tEnd < info.duration - 0.05));
+    const span = trimmed ? (tEnd || info.duration) - tStart : info.duration;
+    const inArgs = trimmed ? ['-ss', String(tStart), ...(tEnd ? ['-t', String(tEnd - tStart)] : [])] : [];
     const progress = (s) => {
       const m = /time=(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(s);
-      if (m && info.duration > 0) onProgress(Math.min(1, (+m[1] * 3600 + +m[2] * 60 + +m[3]) / info.duration));
+      if (m && span > 0) onProgress(Math.min(1, (+m[1] * 3600 + +m[2] * 60 + +m[3]) / span));
     };
     const scale = `scale=w='min(${MAX_W},iw)':h=-2`;
     const attempts = [];
-    if (!alpha && info.codec === 'h264' && info.pix === 'yuv420p')
+    if (!trimmed && !alpha && info.codec === 'h264' && info.pix === 'yuv420p')
       attempts.push({ mode: 'copy', ext: 'mp4', mime: 'video/mp4', args: ['-c:v', 'copy', '-movflags', '+faststart'] });
     if (alpha)
       attempts.push({
@@ -70,7 +75,7 @@ async function convertVideo(src, onProgress = () => {}) {
     let last = '';
     for (const a of attempts) {
       const out = path.join(work, 'out.' + a.ext);
-      const r = await ffmpeg(['-y', '-hide_banner', '-i', input, '-map', '0:v:0', '-an', ...a.args, out], progress);
+      const r = await ffmpeg(['-y', '-hide_banner', ...inArgs, '-i', input, '-map', '0:v:0', '-an', ...a.args, out], progress);
       if (r.code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) {
         onProgress(1);
         return { bytes: fs.readFileSync(out), mime: a.mime, ext: a.ext, alpha: a.mode === 'vp9-alpha', mode: a.mode };

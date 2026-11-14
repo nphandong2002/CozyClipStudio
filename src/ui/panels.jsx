@@ -5,6 +5,7 @@ import { uid } from '../engine/util.js';
 import { renderPropAudio } from '../engine/audio.js';
 import { windowPoints } from '../engine/scene.js';
 import { useAudition } from './useAudioPreview.js';
+import { askTrim } from './TrimDialog.jsx';
 import { setImageSrc, detectKeyBackground, getVideoElement, getMediaDuration, CHROMA_DEFAULTS, LUMA_DEFAULTS, keyModeOf, trimRange } from '../engine/images.js';
 
 const VIDEO_ERR = 'Không đọc được video (định dạng/codec không hỗ trợ). Hãy dùng MP4 (H.264), WebM hoặc MOV.';
@@ -16,10 +17,10 @@ const isVideoFile = (f) => (f.type || '').startsWith('video') || VIDEO_EXT.test(
 const canConvert = () => typeof window !== 'undefined' && !!window.api?.convertVideo;
 
 /** Convert a video with the bundled ffmpeg (Electron only) into a playable MP4 / WebM (alpha kept). */
-async function convertVideoFile(file, onStage) {
+async function convertVideoFile(file, onStage, trim = null) {
   const label = 'Đang chuyển đổi video ' + ((/\.(\w+)$/.exec(file.name || '') || [])[1] || '').toUpperCase();
   onStage({ label: label.trim(), progress: 0 });
-  const r = await window.api.convertVideo(file, (p) => onStage({ label: label.trim(), progress: p }));
+  const r = await window.api.convertVideo(file, (p) => onStage({ label: label.trim(), progress: p }), trim);
   const name = (file.name || 'video').replace(/\.[^.]+$/, '') + '.' + r.ext;
   const out = new File([r.bytes], name, { type: r.mime });
   out.converted = r; // { alpha, mode }
@@ -103,7 +104,16 @@ async function loadMediaFile(file, key, onStage) {
   let info = null;
   if (isVideo) {
     // MOV/MKV/AVI… → convert first; anything else that fails to play gets converted as a fallback
-    if (canConvert() && CONVERT_EXT.test(file.name || '')) file = await convertVideoFile(file, onStage);
+    // Electron: cho cắt đoạn cần dùng TRƯỚC khi nạp (video ngắn -> nhẹ, đỡ crash)
+    let trim = null;
+    if (canConvert() && window.api.probeVideoFile) {
+      const pi = await window.api.probeVideoFile(file);
+      if (pi && pi.duration > 1) {
+        trim = await askTrim(file, pi.duration);
+        if (trim === undefined) throw new Error('Đã huỷ');
+      }
+    }
+    if (canConvert() && (trim || CONVERT_EXT.test(file.name || ''))) file = await convertVideoFile(file, onStage, trim);
     onStage({ label: 'Đang phân tích video', progress: 0.02 });
     try {
       info = await probeVideo(file);
