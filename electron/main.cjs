@@ -7,6 +7,14 @@ const { convertVideo } = require('./mediaConvert.cjs');
 let win;
 let job = null;
 
+// Nếu lần chạy trước renderer bị crash → lần này tắt tăng tốc GPU (nguyên nhân hay gặp của màn hình đen/crash trên Windows).
+const crashFlag = path.join(app.getPath('userData'), 'renderer-crashed.flag');
+const safeGpu = process.argv.includes('--safe-gpu') || process.env.COZY_SAFE_GPU === '1' || fs.existsSync(crashFlag);
+if (safeGpu) {
+  console.warn('[safe-gpu] tắt hardware acceleration (xoá file ' + crashFlag + ' để bật lại)');
+  app.disableHardwareAcceleration();
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1600,
@@ -33,7 +41,13 @@ function createWindow() {
   wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (isMainFrame && code !== -3) retry(`did-fail-load ${code} ${desc} ${url}`);
   });
-  wc.on('render-process-gone', (_e, d) => retry('render-process-gone ' + d.reason));
+  wc.on('render-process-gone', (_e, d) => {
+    console.warn('render-process-gone', JSON.stringify(d), 'gpu=' + !safeGpu);
+    try {
+      fs.writeFileSync(crashFlag, new Date().toISOString() + ' ' + JSON.stringify(d));
+    } catch (_) {}
+    retry('render-process-gone ' + d.reason);
+  });
   wc.on('unresponsive', () => console.warn('window unresponsive'));
   wc.on('did-finish-load', () => (retries = 0));
   // Sau khi trang nạp xong mà root vẫn trống (React không mount) → nạp lại 1 lần.
