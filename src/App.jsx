@@ -130,8 +130,28 @@ export default function App() {
     if (p) setFilePath(p);
   };
   const open = async () => {
-    if (!api) return;
-    const r = await api.openProject();
+    let r = null;
+    if (api) r = await api.openProject();
+    else {
+      // Chạy trên trình duyệt (không có Electron): chọn file .json bằng hộp thoại của trình duyệt
+      r = await new Promise((resolve) => {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = '.json,application/json';
+        inp.onchange = async () => {
+          const f = inp.files?.[0];
+          if (!f) return resolve(null);
+          try {
+            resolve({ path: null, project: JSON.parse(await f.text()) });
+          } catch (e) {
+            alert('File dự án không hợp lệ: ' + e.message);
+            resolve(null);
+          }
+        };
+        inp.oncancel = () => resolve(null);
+        inp.click();
+      });
+    }
     if (r) {
       setProject(migrateProject(r.project));
       setFilePath(r.path);

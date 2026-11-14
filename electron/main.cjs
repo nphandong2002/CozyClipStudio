@@ -18,9 +18,38 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, backgroundThrottling: false },
   });
   win.setMenuBarVisibility(false);
-  if (process.env.VITE_DEV_SERVER_URL) win.loadURL(process.env.VITE_DEV_SERVER_URL);
-  else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  const wc = win.webContents;
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
+  const load = () => (devUrl ? win.loadURL(devUrl) : win.loadFile(path.join(__dirname, '..', 'dist', 'index.html')));
+
+  // Màn hình đen thường do: Vite chưa sẵn sàng lúc nạp trang, hoặc renderer/GPU bị crash → tự nạp lại.
+  let retries = 0;
+  const retry = (why) => {
+    if (win.isDestroyed() || retries >= 20) return;
+    retries++;
+    console.warn(`[reload ${retries}] ${why}`);
+    setTimeout(() => !win.isDestroyed() && load().catch(() => {}), 500);
+  };
+  wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    if (isMainFrame && code !== -3) retry(`did-fail-load ${code} ${desc} ${url}`);
+  });
+  wc.on('render-process-gone', (_e, d) => retry('render-process-gone ' + d.reason));
+  wc.on('unresponsive', () => console.warn('window unresponsive'));
+  wc.on('did-finish-load', () => (retries = 0));
+  // Sau khi trang nạp xong mà root vẫn trống (React không mount) → nạp lại 1 lần.
+  wc.on('did-finish-load', () => {
+    setTimeout(async () => {
+      if (win.isDestroyed()) return;
+      try {
+        const empty = await wc.executeJavaScript('!document.getElementById("root") || document.getElementById("root").childElementCount === 0');
+        if (empty) retry('root trống');
+      } catch (_) {}
+    }, 3000);
+  });
+  load().catch(() => {});
 }
+
+app.on('child-process-gone', (_e, d) => console.warn('child-process-gone', d.type, d.reason));
 
 app.whenReady().then(() => {
   createWindow();
