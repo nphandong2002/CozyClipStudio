@@ -140,6 +140,35 @@ ipcMain.handle('spine:guess', async () => {
   return null;
 });
 
+// ---------------------------------------------------------------- cache
+// Bản lưu tự động của dự án (không đẩy lên git). Dev: <thư mục app>/.cache ; bản đóng gói: userData.
+const cacheDir = () => (app.isPackaged ? path.join(app.getPath('userData'), 'cache') : path.join(app.getAppPath(), '.cache'));
+const cacheFile = (n = 'autosave') => path.join(cacheDir(), n + '.cozy.json');
+let lastRotate = 0;
+ipcMain.handle('cache:save', async (_e, json) => {
+  fs.mkdirSync(cacheDir(), { recursive: true });
+  const f = cacheFile();
+  // giữ 1 bản cũ (tối đa mỗi 60s) để lỡ bản mới hỏng vẫn còn đường lui
+  if (Date.now() - lastRotate > 60000 && fs.existsSync(f)) {
+    try {
+      fs.copyFileSync(f, cacheFile('autosave.prev'));
+      lastRotate = Date.now();
+    } catch (_) {}
+  }
+  const tmp = f + '.tmp';
+  fs.writeFileSync(tmp, json);
+  fs.renameSync(tmp, f); // ghi nguyên tử: crash giữa chừng không làm hỏng file
+  return true;
+});
+ipcMain.handle('cache:load', async () => {
+  for (const n of ['autosave', 'autosave.prev']) {
+    try {
+      return JSON.parse(fs.readFileSync(cacheFile(n), 'utf8'));
+    } catch (_) {}
+  }
+  return null;
+});
+
 // ---------------------------------------------------------------- project
 ipcMain.handle('project:save', async (_e, project, filePath) => {
   let p = filePath;

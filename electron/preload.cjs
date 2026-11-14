@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('api', {
   loadSpine: (dir) => ipcRenderer.invoke('spine:load', dir),
   guessSpine: () => ipcRenderer.invoke('spine:guess'),
   saveProject: (project, path) => ipcRenderer.invoke('project:save', project, path),
+  saveCache: (json) => ipcRenderer.invoke('cache:save', json),
+  loadCache: () => ipcRenderer.invoke('cache:load'),
   openProject: () => ipcRenderer.invoke('project:open'),
   pickOutput: (name) => ipcRenderer.invoke('export:pickOutput', name),
   exportBegin: (opts) => ipcRenderer.invoke('export:begin', opts),

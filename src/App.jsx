@@ -39,13 +39,35 @@ export default function App() {
   const clock = useRef({ start: performance.now(), pausedAt: 0 });
   const clipboard = useRef(null);
 
-  // autosave
+  // Khôi phục từ file cache (Electron) nếu có — ưu tiên hơn localStorage vì không bị giới hạn dung lượng
+  const cacheReady = useRef(!api?.loadCache);
   useEffect(() => {
+    if (!api?.loadCache) return;
+    api
+      .loadCache()
+      .then((c) => {
+        if (c) setProject(migrateProject(c));
+      })
+      .catch((e) => console.warn('loadCache', e))
+      .finally(() => (cacheReady.current = true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // autosave: mỗi thay đổi → ghi ra file cache (và localStorage nếu còn chỗ)
+  useEffect(() => {
+    if (!cacheReady.current) return; // chưa nạp xong cache thì không ghi đè
     const id = setTimeout(() => {
+      let json;
       try {
-        localStorage.setItem(STORE_KEY, JSON.stringify(project));
+        json = JSON.stringify(project);
+      } catch (_) {
+        return;
+      }
+      api?.saveCache?.(json).catch((e) => console.warn('saveCache', e));
+      try {
+        localStorage.setItem(STORE_KEY, json);
       } catch (_) {}
-    }, 400);
+    }, 150);
     return () => clearTimeout(id);
   }, [project]);
 
