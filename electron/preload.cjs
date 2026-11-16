@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('api', {
   saveProject: (project, path) => ipcRenderer.invoke('project:save', project, path),
   saveCache: (json) => ipcRenderer.invoke('cache:save', json),
   loadCache: () => ipcRenderer.invoke('cache:load'),
+  saveLibrary: (json) => ipcRenderer.invoke('library:save', json),
+  loadLibrary: () => ipcRenderer.invoke('library:load'),
   openProject: () => ipcRenderer.invoke('project:open'),
   pickOutput: (name) => ipcRenderer.invoke('export:pickOutput', name),
   exportBegin: (opts) => ipcRenderer.invoke('export:begin', opts),

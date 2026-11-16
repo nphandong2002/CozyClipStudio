@@ -169,6 +169,29 @@ ipcMain.handle('cache:load', async () => {
   return null;
 });
 
+// Thư viện nhân vật + tên tuỳ chỉnh, dùng chung cho mọi dự án
+const libraryFile = () => path.join(cacheDir(), 'library.json');
+ipcMain.handle('library:save', async (_e, json) => {
+  fs.mkdirSync(cacheDir(), { recursive: true });
+  const f = libraryFile();
+  if (fs.existsSync(f)) {
+    try {
+      fs.copyFileSync(f, f + '.prev');
+    } catch (_) {}
+  }
+  fs.writeFileSync(f + '.tmp', json);
+  fs.renameSync(f + '.tmp', f);
+  return true;
+});
+ipcMain.handle('library:load', async () => {
+  for (const f of [libraryFile(), libraryFile() + '.prev']) {
+    try {
+      return JSON.parse(fs.readFileSync(f, 'utf8'));
+    } catch (_) {}
+  }
+  return null;
+});
+
 // ---------------------------------------------------------------- project
 ipcMain.handle('project:save', async (_e, project, filePath) => {
   let p = filePath;

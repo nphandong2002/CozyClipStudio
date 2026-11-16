@@ -6,6 +6,7 @@ import { renderPropAudio } from '../engine/audio.js';
 import { windowPoints } from '../engine/scene.js';
 import { useAudition } from './useAudioPreview.js';
 import { askTrim } from './TrimDialog.jsx';
+import { useLibrary, setLibrary, partLabel, addLibraryCharToProject, projectFieldsFromSkin, newLibChar, newSkin } from './library.js';
 import { setImageSrc, detectKeyBackground, getVideoElement, getMediaDuration, CHROMA_DEFAULTS, LUMA_DEFAULTS, keyModeOf, trimRange } from '../engine/images.js';
 
 const VIDEO_ERR = 'Không đọc được video (định dạng/codec không hỗ trợ). Hãy dùng MP4 (H.264), WebM hoặc MOV.';
@@ -742,13 +743,56 @@ const PARAM_LABELS = { curtains: 'Có rèm cửa', curtainColor: 'Màu rèm', co
 
 // -------------------------------------------------------------- character
 const short = (n) => n.split('/').pop();
-export function CharacterPanel({ project, update, rig, charSel, setCharSel }) {
+export function CharacterPanel({ project, update, rig, charSel, setCharSel, openLibrary }) {
+  const lib = useLibrary();
   if (!rig) return <p className="muted">Chưa tải nhân vật Spine.</p>;
   const chars = project.characters || [];
   const sel = chars.find((x) => x.id === charSel) || chars[0];
   const cat = rig.catalog;
-  const opt = (list, none) => [...(none ? [['', none]] : []), ...list.map((n) => [n, short(n)])];
-  const set = (k, v) => update((p) => (p.characters.find((x) => x.id === sel.id)[k] = v));
+  const nameOf = (n) => (lib.labels[n] ? `${lib.labels[n]} (${short(n)})` : short(n));
+  const opt = (list, none) => [...(none ? [['', none]] : []), ...list.map((n) => [n, nameOf(n)])];
+  const LOOK_FIELDS = ['skin', 'eyes', 'costume', 'mask', 'rod'];
+  const set = (k, v) =>
+    update((p) => {
+      const c = p.characters.find((x) => x.id === sel.id);
+      c[k] = v;
+      if (LOOK_FIELDS.includes(k) && c.lib) c.lib = { ...c.lib, skin: '' }; // chỉnh tay → không còn khớp skin thư viện
+    });
+
+  // ---- thư viện
+  const libChar = sel?.lib && lib.characters.find((c) => c.id === sel.lib.char);
+  const addFromLib = (v) => {
+    const [cid, sid] = v.split('|');
+    const lc = lib.characters.find((c) => c.id === cid);
+    const sk = lc?.skins.find((s) => s.id === sid);
+    if (!lc || !sk) return;
+    const id = uid('c');
+    update((p) => addLibraryCharToProject(p, lc, sk, cat.rods[0] || '', id));
+    setCharSel(id);
+  };
+  const applyLibSkin = (sid) => {
+    const sk = libChar?.skins.find((s) => s.id === sid);
+    if (!sk) return;
+    update((p) => Object.assign(p.characters.find((x) => x.id === sel.id), projectFieldsFromSkin(libChar, sk)));
+  };
+  // Electron không hỗ trợ prompt() → dùng tên mặc định, đổi tên sau ở trang Thư viện nhân vật
+  const saveToLib = () => {
+    const skin = { ...newSkin(), eyes: sel.eyes || '', costume: sel.costume || '', mask: sel.mask || '', rod: sel.rod || '' };
+    const sameBase = libChar && libChar.base === sel.skin;
+    if (sameBase && confirm(`Thêm diện mạo hiện tại thành skin mới của "${libChar.name}" trong thư viện?
+(Huỷ = tạo nhân vật mới trong thư viện)`)) {
+      skin.name = 'Skin ' + (libChar.skins.length + 1);
+      setLibrary((l) => l.characters.find((c) => c.id === libChar.id)?.skins.push(skin));
+      update((p) => (p.characters.find((x) => x.id === sel.id).lib = { char: libChar.id, skin: skin.id }));
+      alert(`Đã thêm "${skin.name}" vào "${libChar.name}". Đổi tên skin ở trang Thư viện nhân vật.`);
+      return;
+    }
+    const lc = { ...newLibChar(sel.skin), name: sel.name || 'Nhân vật mới', scale: sel.scale ?? 0.6, facesLeft: !!sel.facesLeft, skins: [skin] };
+    setLibrary((l) => l.characters.push(lc));
+    update((p) => (p.characters.find((x) => x.id === sel.id).lib = { char: lc.id, skin: skin.id }));
+    alert(`Đã lưu "${lc.name}" vào thư viện. Đổi tên / thêm skin ở trang Thư viện nhân vật.`);
+  };
+  const libOptions = [['', '+ Thêm từ thư viện…'], ...lib.characters.flatMap((c) => c.skins.map((s) => [c.id + '|' + s.id, `${c.name} — ${s.name}`]))];
 
   const addChar = () => {
     const id = uid('c');
@@ -801,12 +845,21 @@ export function CharacterPanel({ project, update, rig, charSel, setCharSel }) {
   return (
     <div>
       <h3>Nhân vật trong clip</h3>
-      <button onClick={addChar}>+ Thêm nhân vật</button>
+      <div className="row">
+        <button onClick={addChar}>+ Thêm nhân vật</button>
+        {lib.characters.length ? (
+          <Select value="" options={libOptions} onChange={(v) => v && addFromLib(v)} />
+        ) : (
+          <button onClick={openLibrary} title="Tạo nhân vật + skin dùng lại cho mọi dự án">
+            Mở thư viện nhân vật
+          </button>
+        )}
+      </div>
       <ul className="list">
         {chars.map((c) => (
           <li key={c.id} className={sel?.id === c.id ? 'on' : ''} onClick={() => setCharSel(c.id)}>
             <span className="grow">🐾 {c.name}</span>
-            <span className="badge">{short(c.skin || '')}</span>
+            <span className="badge">{partLabel(c.skin || '', lib)}</span>
           </li>
         ))}
       </ul>
@@ -815,10 +868,19 @@ export function CharacterPanel({ project, update, rig, charSel, setCharSel }) {
           <Field label="Tên hiển thị">
             <input value={sel.name || ''} onChange={(e) => set('name', e.target.value)} />
           </Field>
-          <Field label="Nhân vật">
+          {libChar && (
+            <Field label={`Skin (thư viện: ${libChar.name})`}>
+              <Select
+                value={sel.lib.skin || ''}
+                options={[...(sel.lib.skin && libChar.skins.some((s) => s.id === sel.lib.skin) ? [] : [['', '— đã chỉnh tay —']]), ...libChar.skins.map((s) => [s.id, s.name])]}
+                onChange={(v) => v && applyLibSkin(v)}
+              />
+            </Field>
+          )}
+          <Field label="Nhân vật gốc">
             <Select value={sel.skin} options={opt(cat.characters)} onChange={(v) => set('skin', v)} />
           </Field>
-          <Field label="Màu mắt">
+          <Field label="Mẫu mắt">
             <Select value={sel.eyes} options={opt(cat.eyes, 'Mặc định')} onChange={(v) => set('eyes', v)} />
           </Field>
           <Field label="Trang phục">
@@ -838,6 +900,9 @@ export function CharacterPanel({ project, update, rig, charSel, setCharSel }) {
           </label>
           <div className="row">
             <button onClick={dupChar}>Nhân bản</button>
+            <button onClick={saveToLib} title="Lưu diện mạo này vào thư viện để dùng cho dự án khác">
+              Lưu vào thư viện
+            </button>
             <button className="danger" disabled={chars.length <= 1} onClick={delChar}>
               Xoá nhân vật
             </button>

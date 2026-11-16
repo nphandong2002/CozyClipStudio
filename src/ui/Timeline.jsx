@@ -1,5 +1,6 @@
 import React from 'react';
-import { ACTIONS, actionDef } from '../engine/character.js';
+import { actionDef } from '../engine/character.js';
+import { useLibrary, actionLabel, actionOptions as actionOptionsFor } from './library.js';
 import { TIMES, WEATHERS } from '../engine/world.js';
 import { fmtDuration, characterList, castEntry } from '../engine/scene.js';
 import { renderActionAudio } from '../engine/audio.js';
@@ -10,6 +11,7 @@ import { useAudition } from './useAudioPreview.js';
 const COLORS = ['#7aa5d8', '#d89a7a', '#8fc49a', '#c79ad8', '#d8c47a', '#7ad8c9'];
 
 export default function Timeline({ project, update, plan, segIndex, setSegIndex, rig }) {
+  const lib = useLibrary();
   const tl = project.timeline;
   const seg = tl[Math.min(segIndex, tl.length - 1)];
   const chars = characterList(project);
@@ -22,10 +24,7 @@ export default function Timeline({ project, update, plan, segIndex, setSegIndex,
       s.cast[charId] = { ...(s.cast[charId] || {}), [k]: v };
     });
   const total = plan.total || 1;
-  const actionOptions = [
-    ...Object.entries(ACTIONS).map(([k, a]) => [k, a.label]),
-    ...(rig ? rig.animNames.filter((n) => n !== 'default').map((n) => ['anim:' + n, 'Spine: ' + n]) : []),
-  ];
+  const actionOptions = actionOptionsFor(rig, lib);
   const segHasSound = (s) => chars.some((c) => actionDef(castEntry(s, c.id)?.action).sound);
   const moveSeg = (dir) => {
     const j = segIndex + dir;
@@ -61,7 +60,7 @@ export default function Timeline({ project, update, plan, segIndex, setSegIndex,
           const i = tl.indexOf(c.seg);
           const w = Math.max(0.6, ((c.T * c.repeats) / total) * 100);
           if (c.kind === 'move') return <div key={c.id} className="tl-move" style={{ width: w + '%' }} title={`Đi bộ ${c.T.toFixed(1)}s`} />;
-          const titleText = chars.map((ch) => `${ch.name}: ${actionDef(castEntry(c.seg, ch.id)?.action).label}`).join(' · ');
+          const titleText = chars.map((ch) => `${ch.name}: ${actionLabel(castEntry(c.seg, ch.id)?.action || 'sit', lib)}`).join(' · ');
           return (
             <div
               key={c.id}

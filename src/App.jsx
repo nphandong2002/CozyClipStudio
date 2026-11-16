@@ -10,6 +10,8 @@ import { useAudioPreview, useBackgroundAudio, useAuditionSolo } from './ui/useAu
 import { useHistory } from './ui/useHistory.js';
 import { preloadProject } from './engine/images.js';
 import { uid } from './engine/util.js';
+import { LibraryPage, NamesPage } from './ui/LibraryPages.jsx';
+import { addLibraryCharToProject } from './ui/library.js';
 
 const STORE_KEY = 'cozyclip.project.v1';
 const api = typeof window !== 'undefined' ? window.api : null;
@@ -26,6 +28,7 @@ export default function App() {
   const { project, update, setProject, undo, redo } = useHistory(loadStored);
   const [rig, setRig] = useState(null);
   const [spineMsg, setSpineMsg] = useState('Đang tải nhân vật…');
+  const [view, setView] = useState('edit'); // 'edit' | 'library' | 'names'
   const [tab, setTab] = useState('scene');
   const [selection, setSelection] = useState(null); // {kind:'prop'|'anchor', id}
   const [charSel, setCharSel] = useState(null);
@@ -129,8 +132,9 @@ export default function App() {
   }, [activeClip?.id]);
 
   const solo = useAuditionSolo(); // a "nghe thử" is playing → scene audio muted meanwhile
-  useAudioPreview({ project, rig, clip: activeClip, playing: playing && !muted, clock, solo });
-  useBackgroundAudio({ project, playing: playing && !muted, solo });
+  const editing = view === 'edit';
+  useAudioPreview({ project, rig, clip: activeClip, playing: editing && playing && !muted, clock, solo });
+  useBackgroundAudio({ project, playing: editing && playing && !muted, solo });
 
   // preload user-uploaded images (object props + background)
   useEffect(() => {
@@ -187,6 +191,18 @@ export default function App() {
     setProject(p);
     setSegIndex(0);
     setSelection(null);
+  };
+
+  // Thêm một nhân vật (với skin đã chọn) từ thư viện vào dự án đang mở
+  const addFromLibrary = (libChar, skin) => {
+    const id = uid('c'); // tạo id ngoài updater (updater có thể chạy 2 lần)
+    update((p) => {
+      addLibraryCharToProject(p, libChar, skin, rig?.catalog.rods[0] || '', id);
+    });
+    setView('edit');
+    setTab('char');
+    setCharSel(id);
+    setSelection({ kind: 'char', id });
   };
 
   // ---------------------------------------------------- selection operations
@@ -263,6 +279,7 @@ export default function App() {
   const keyRef = useRef(null);
   keyRef.current = (e) => {
     const el = document.activeElement;
+    if (view !== 'edit') return; // phím tắt chỉnh sửa chỉ dùng ở màn dựng clip
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
@@ -307,6 +324,17 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">CozyClip Studio</div>
+        <nav className="views">
+          {[
+            ['edit', '🎬 Dựng clip'],
+            ['library', '🐾 Thư viện nhân vật'],
+            ['names', '🏷 Đặt tên bộ phận'],
+          ].map(([k, l]) => (
+            <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>
+              {l}
+            </button>
+          ))}
+        </nav>
         <input className="name" value={project.name} onChange={(e) => update((p) => (p.name = e.target.value))} />
         <div className="spacer" />
         <span className="muted small">{spineMsg}</span>
@@ -321,6 +349,9 @@ export default function App() {
         </button>
       </header>
 
+      {view === 'library' && <LibraryPage rig={rig} onAddToProject={addFromLibrary} goNames={() => setView('names')} />}
+      {view === 'names' && <NamesPage rig={rig} />}
+      {view === 'edit' && (
       <div className="main">
         <aside className="side">
           <nav className="tabs">
@@ -345,7 +376,7 @@ export default function App() {
               />
             )}
             {tab === 'props' && <PropsPanel project={project} update={update} selection={selection} setSelection={setSelection} />}
-            {tab === 'char' && <CharacterPanel project={project} update={update} rig={rig} charSel={charSel} setCharSel={setCharSel} />}
+            {tab === 'char' && <CharacterPanel project={project} update={update} rig={rig} charSel={charSel} setCharSel={setCharSel} openLibrary={() => setView('library')} />}
           </div>
         </aside>
 
@@ -388,6 +419,7 @@ export default function App() {
           <Timeline project={project} update={update} plan={plan} segIndex={segIndex} setSegIndex={setSegIndex} rig={rig} />
         </section>
       </div>
+      )}
 
       {exportOpen && <ExportDialog project={project} rig={rig} api={api} onClose={() => setExportOpen(false)} />}
     </div>
