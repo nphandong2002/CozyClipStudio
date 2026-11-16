@@ -103,6 +103,7 @@ export function migrateProject(project) {
     }
     if (ce?.scale != null && ce.scale !== 1) out.scale = ce.scale;
     if (ce?.flip) out.flip = true;
+    if (ce?.enter && typeof ce.enter === 'object') out.enter = ce.enter; // cách di chuyển vào phân cảnh
     return out;
   };
 

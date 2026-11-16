@@ -1,6 +1,7 @@
 import React from 'react';
 import { actionDef } from '../engine/character.js';
 import { useLibrary, actionLabel, actionOptions as actionOptionsFor } from './library.js';
+import { ENTER_PRESETS, resolveEnter } from '../engine/scene.js';
 import { TIMES, WEATHERS } from '../engine/world.js';
 import { fmtDuration, characterList, castEntry } from '../engine/scene.js';
 import { renderActionAudio } from '../engine/audio.js';
@@ -9,6 +10,62 @@ import { Field, Select } from './panels.jsx';
 import { useAudition } from './useAudioPreview.js';
 
 const COLORS = ['#7aa5d8', '#d89a7a', '#8fc49a', '#c79ad8', '#d8c47a', '#7ad8c9'];
+
+const presetOf = (e) =>
+  !e || e.mode === 'walk' || !e.mode
+    ? 'walk'
+    : e.mode === 'instant'
+    ? 'instant'
+    : e.action === 'anim:run' && e.path !== 'arc'
+    ? 'run'
+    : e.action === 'anim:jump' && e.path === 'arc'
+    ? 'jump'
+    : 'custom';
+
+/** "Đến vị trí này bằng…": how a character moves from the previous segment into this one. */
+function EnterEditor({ project, rig, prevCe, ce, actionOptions, setEnter }) {
+  const e = ce.enter || { mode: 'walk' };
+  const mv = resolveEnter(project, rig, prevCe, ce);
+  const moved = prevCe && Math.hypot((ce.x ?? 0) - (prevCe.x ?? 0), (ce.y ?? 0) - (prevCe.y ?? 0)) > 2;
+  const patch = (k, v) => setEnter({ ...e, [k]: v });
+  const info = mv
+    ? `${mv.delay ? 'chờ ' + mv.delay.toFixed(1) + 's rồi ' : ''}${moved ? 'di chuyển' : 'diễn tại chỗ'} ${mv.T.toFixed(1)}s`
+    : e.mode === 'instant'
+    ? 'xuất hiện ngay ở vị trí mới'
+    : 'không đổi vị trí → không có đoạn di chuyển';
+  return (
+    <div className="tl-enter">
+      <Field label="↪ Đến vị trí này bằng">
+        <Select value={presetOf(e)} options={Object.entries(ENTER_PRESETS).map(([k, p]) => [k, p.label])} onChange={(k) => setEnter(structuredClone(ENTER_PRESETS[k].enter))} />
+      </Field>
+      {e.mode === 'custom' && (
+        <>
+          <Field label="Hành động khi di chuyển">
+            <Select value={e.action || 'anim:walk'} options={actionOptions} onChange={(v) => patch('action', v)} />
+          </Field>
+          <Field label="Đường đi">
+            <Select value={e.path || 'line'} options={[['line', 'Thẳng'], ['arc', 'Vòng cung (nhảy lên/xuống)']]} onChange={(v) => patch('path', v)} />
+          </Field>
+          {e.path === 'arc' && (
+            <Field label="Độ cao vòng cung (px)">
+              <input type="number" min={0} max={1000} step={10} value={e.height ?? 120} onChange={(ev) => patch('height', Math.max(0, +ev.target.value || 0))} />
+            </Field>
+          )}
+          <Field label="Hoạt ảnh">
+            <Select value={e.once ? 'once' : 'loop'} options={[['loop', 'Lặp lại liên tục'], ['once', 'Một lần, trải hết quãng']]} onChange={(v) => patch('once', v === 'once')} />
+          </Field>
+          <Field label="Thời gian (s, 0 = tự động)">
+            <input type="number" min={0} max={30} step={0.1} value={e.duration ?? 0} onChange={(ev) => patch('duration', Math.max(0, +ev.target.value || 0))} />
+          </Field>
+          <Field label="Chờ trước khi đi (s)">
+            <input type="number" min={0} max={30} step={0.1} value={e.delay ?? 0} onChange={(ev) => patch('delay', Math.max(0, +ev.target.value || 0))} />
+          </Field>
+        </>
+      )}
+      <span className="muted small tl-enter-info">{info}</span>
+    </div>
+  );
+}
 
 export default function Timeline({ project, update, plan, segIndex, setSegIndex, rig }) {
   const lib = useLibrary();
@@ -59,7 +116,7 @@ export default function Timeline({ project, update, plan, segIndex, setSegIndex,
         {plan.clips.map((c) => {
           const i = tl.indexOf(c.seg);
           const w = Math.max(0.6, ((c.T * c.repeats) / total) * 100);
-          if (c.kind === 'move') return <div key={c.id} className="tl-move" style={{ width: w + '%' }} title={`Đi bộ ${c.T.toFixed(1)}s`} />;
+          if (c.kind === 'move') return <div key={c.id} className="tl-move" style={{ width: w + '%' }} title={`Di chuyển ${c.T.toFixed(1)}s`} />;
           const titleText = chars.map((ch) => `${ch.name}: ${actionLabel(castEntry(c.seg, ch.id)?.action || 'sit', lib)}`).join(' · ');
           return (
             <div
@@ -80,8 +137,10 @@ export default function Timeline({ project, update, plan, segIndex, setSegIndex,
             <strong className="muted small">Phân cảnh {segIndex + 1} — mỗi nhân vật làm gì:</strong>
             {chars.map((ch) => {
               const ce = castEntry(seg, ch.id) || {};
+              const prevCe = segIndex > 0 ? castEntry(tl[segIndex - 1], ch.id) : null;
               return (
-                <div className="tl-cast-row" key={ch.id}>
+                <React.Fragment key={ch.id}>
+                <div className="tl-cast-row">
                   <span className="tl-cast-name">🐾 {ch.name}</span>
                   <Field label="Hành động">
                     <Select value={ce.action || 'sit'} options={actionOptions} onChange={(v) => setCast(ch.id, 'action', v)} />
@@ -105,6 +164,10 @@ export default function Timeline({ project, update, plan, segIndex, setSegIndex,
                     </button>
                   )}
                 </div>
+                {prevCe && (
+                  <EnterEditor project={project} rig={rig} prevCe={prevCe} ce={ce} actionOptions={actionOptions} setEnter={(v) => setCast(ch.id, 'enter', v)} />
+                )}
+                </React.Fragment>
               );
             })}
           </div>

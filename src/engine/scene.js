@@ -43,7 +43,9 @@ export function renderFrame(ctx, project, rig, state) {
   if (rig) {
     for (const pl of characterPlacements(project, state)) {
       rig.setLook(pl.char, pl.action);
-      rig.pose(pl.action, pl.animT, state.L, { free: !!pl.free, seed: pl.seed });
+      // "một lần": trải đúng 1 vòng hoạt ảnh theo thời gian di chuyển (nhảy lên/xuống giường…)
+      const animT = pl.onceProgress != null ? Math.min(0.999, pl.onceProgress) * rig.cycleDuration(pl.action) : pl.animT;
+      rig.pose(pl.action, animT, state.L, { free: !!pl.free, seed: pl.seed });
       ctx.save();
       ctx.fillStyle = 'rgba(0,0,0,0.22)';
       ctx.beginPath();
@@ -134,9 +136,65 @@ export function windowPoints(win) {
 const MOVE_EPS = 2; // px: below this, a character is considered standing still between segments
 
 /**
+ * How a character gets to its position in a segment (stored on the destination cast entry as `enter`):
+ *  mode 'walk'    – đi bộ thẳng (mặc định, như trước)
+ *  mode 'custom'  – hành động tuỳ chọn: { action, path: 'line'|'arc', height, duration (0 = tự động),
+ *                   once (trải 1 vòng hoạt ảnh trên cả quãng), delay (chờ trước, giây) }.
+ *                   Dùng được cả khi đứng yên tại chỗ (vd. thức dậy, vươn vai).
+ *  mode 'instant' – xuất hiện ngay ở vị trí mới, không có đoạn di chuyển.
+ */
+export const ENTER_PRESETS = {
+  walk: { label: 'Đi bộ', enter: { mode: 'walk' } },
+  run: { label: 'Chạy', enter: { mode: 'custom', action: 'anim:run', path: 'line', height: 0, duration: 0, once: false, delay: 0 } },
+  jump: { label: 'Nhảy (vòng cung)', enter: { mode: 'custom', action: 'anim:jump', path: 'arc', height: 160, duration: 0, once: true, delay: 0 } },
+  custom: { label: 'Tuỳ chỉnh…', enter: { mode: 'custom', action: 'anim:walk', path: 'line', height: 120, duration: 0, once: false, delay: 0 } },
+  instant: { label: 'Xuất hiện ngay', enter: { mode: 'instant' } },
+};
+
+const isMoving = (from, to) => !!(from && to && Math.hypot(to.x - from.x, to.y - from.y) > MOVE_EPS);
+
+/**
+ * Resolve one character's transition into `to` (cast entry of the new segment).
+ * Returns null when there is nothing to animate, else
+ * { from, to, action, path, height, once, delay, T, moving, fromAction }.
+ */
+export function resolveEnter(project, rig, from, to) {
+  if (!from || !to) return null;
+  const e = to.enter || { mode: 'walk' };
+  const moving = isMoving(from, to);
+  if (e.mode === 'instant') return null;
+  const fps = project.output.fps;
+  const frames = (s) => Math.max(1 / fps, Math.round(s * fps) / fps);
+  if (e.mode !== 'custom') {
+    if (!moving) return null;
+    return { from, to, action: 'anim:walk', path: 'line', height: 0, once: false, delay: 0, T: moveDuration(project, from, to), moving, fromAction: from.action };
+  }
+  const action = e.action || 'anim:walk';
+  let T = +e.duration || 0;
+  if (!T) {
+    if (e.once && rig) T = rig.cycleDuration(action);
+    else if (moving) T = moveDuration(project, from, to);
+    else T = rig ? rig.cycleDuration(action) : 2;
+  }
+  T = frames(Math.min(30, Math.max(0.2, T)));
+  return {
+    from,
+    to,
+    action,
+    path: e.path === 'arc' ? 'arc' : 'line',
+    height: +e.height || 0,
+    once: !!e.once,
+    delay: +e.delay > 0 ? Math.round(+e.delay * fps) / fps : 0,
+    T,
+    moving,
+    fromAction: from.action,
+  };
+}
+
+/**
  * Placement for every character in this frame, depth-sorted (lower on screen = nearer = drawn on top).
- * During a move clip, each character walks its own from→to position; characters that keep their
- * position stand still and keep doing their action.
+ * During a move clip each character follows its own transition (walk / custom action / arc jump) with its
+ * own duration and delay; before it starts it keeps its previous action, after it arrives it starts the new one.
  */
 export function characterPlacements(project, state) {
   const chars = characterList(project);
@@ -146,24 +204,36 @@ export function characterPlacements(project, state) {
     const base = c.scale || 0.6;
     const seed = charSeed(c.id);
     const mv = state.move ? state.move.moveCast?.[c.id] : null;
-    const moving = mv && mv.from && mv.to && Math.hypot(mv.to.x - mv.from.x, mv.to.y - mv.from.y) > MOVE_EPS;
-    if (moving) {
+    if (mv && mv.T) {
+      const tm = state.move.u * state.move.T; // giây trong đoạn di chuyển
       const a = mv.from;
       const b = mv.to;
-      const u = state.move.u;
-      const k = smooth(u);
-      const goingRight = b.x > a.x;
-      out.push({
-        char: c,
-        seed,
-        free: true,
-        action: 'anim:walk',
-        animT: u * state.move.T,
-        x: lerp(a.x, b.x, u),
-        y: lerp(a.y, b.y, k),
-        scale: base * lerp(a.scale || 1, b.scale || 1, k),
-        flip: c.facesLeft ? goingRight : !goingRight,
-      });
+      const flipAt = (p) => !!p.flip;
+      if (tm < mv.delay) {
+        out.push({ char: c, seed, free: true, action: mv.fromAction, animT: tm, x: a.x, y: a.y, scale: base * (a.scale || 1), flip: flipAt(a) });
+      } else if (tm < mv.delay + mv.T) {
+        const v = (tm - mv.delay) / mv.T;
+        const k = smooth(v);
+        const dx = b.x - a.x;
+        const arc = mv.path === 'arc';
+        const y = arc ? lerp(a.y, b.y, v) - mv.height * 4 * v * (1 - v) : lerp(a.y, b.y, k);
+        // hướng mặt: theo chiều đi ngang; đi thẳng lên/xuống thì giữ hướng của vị trí đích
+        const flip = Math.abs(dx) > MOVE_EPS ? (c.facesLeft ? dx > 0 : dx < 0) : flipAt(b);
+        out.push({
+          char: c,
+          seed,
+          free: true,
+          action: mv.action,
+          animT: tm - mv.delay,
+          onceProgress: mv.once ? v : null,
+          x: lerp(a.x, b.x, v),
+          y,
+          scale: base * lerp(a.scale || 1, b.scale || 1, k),
+          flip,
+        });
+      } else {
+        out.push({ char: c, seed, free: true, action: b.action, animT: tm - mv.delay - mv.T, x: b.x, y: b.y, scale: base * (b.scale || 1), flip: flipAt(b) });
+      }
     } else {
       const ce = castEntry(seg, c.id);
       if (!ce || typeof ce.x !== 'number') continue;
@@ -190,7 +260,7 @@ export function moveDuration(project, from, to) {
  * move clip: walking between anchors, rendered once.
  * `phase` keeps prop animation continuous across clips.
  */
-export function buildPlan(project) {
+export function buildPlan(project, rig = null) {
   const L = project.output.loopSeconds;
   const chars = characterList(project);
   const clips = [];
@@ -198,15 +268,16 @@ export function buildPlan(project) {
   let prev = null;
   project.timeline.forEach((seg, i) => {
     if (prev) {
-      // Per-character walk: each character moves from its previous position to its new one.
+      // Per-character transition: walk / custom action / arc jump, each with its own duration + delay.
       const moveCast = {};
       let maxT = 0;
       for (const c of chars) {
-        const from = castEntry(prev, c.id);
-        const to = castEntry(seg, c.id);
-        moveCast[c.id] = { from, to };
-        maxT = Math.max(maxT, moveDuration(project, from, to));
+        const mv = resolveEnter(project, rig, castEntry(prev, c.id), castEntry(seg, c.id));
+        if (!mv) continue;
+        moveCast[c.id] = mv;
+        maxT = Math.max(maxT, mv.delay + mv.T);
       }
+      maxT = Math.round(maxT * project.output.fps) / project.output.fps;
       if (maxT > 0) {
         clips.push({ kind: 'move', id: `move_${i}`, seg, moveCast, T: maxT, phase, repeats: 1 });
         phase = mod(phase + maxT, L);

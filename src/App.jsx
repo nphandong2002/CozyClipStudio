@@ -120,7 +120,7 @@ export default function App() {
     }
   };
 
-  const plan = useMemo(() => buildPlan(project), [project]);
+  const plan = useMemo(() => buildPlan(project, rig), [project, rig]);
   const seg = project.timeline[Math.min(segIndex, project.timeline.length - 1)];
   const loopClip = plan.clips.find((c) => c.kind === 'loop' && c.seg === seg) || plan.clips.find((c) => c.kind === 'loop');
   const moveClip = plan.clips[plan.clips.indexOf(loopClip) - 1];

@@ -17,15 +17,15 @@ function dataUrlToBytes(dataURL) {
   return { bytes, ext: AUDIO_EXT[mime] || 'bin' };
 }
 
-export function planStats(project) {
-  const plan = buildPlan(project);
+export function planStats(project, rig = null) {
+  const plan = buildPlan(project, rig);
   const fps = project.output.fps;
   const frames = plan.clips.reduce((s, c) => s + Math.round(c.T * fps), 0);
   return { ...plan, framesToRender: frames };
 }
 
 export async function exportProject({ project, rig, api, outFile, onProgress = () => {}, isCancelled = () => false }) {
-  const plan = buildPlan(project);
+  const plan = buildPlan(project, rig);
   const { width, height, fps } = project.output;
   const L = project.output.loopSeconds;
   const canvas = document.createElement('canvas');

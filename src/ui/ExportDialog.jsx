@@ -3,7 +3,7 @@ import { planStats, exportProject } from '../engine/exporter.js';
 import { fmtDuration } from '../engine/scene.js';
 
 export default function ExportDialog({ project, rig, api, onClose }) {
-  const stats = planStats(project);
+  const stats = planStats(project, rig);
   const [outFile, setOutFile] = useState('');
   const [state, setState] = useState(null); // {progress, detail, stage}
   const [result, setResult] = useState(null);

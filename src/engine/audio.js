@@ -242,16 +242,16 @@ function propLayers(p, sc, L) {
 }
 
 // ------------------------------------------------------- character action
-/** Footsteps for one character walking from → to (positions {x,y}) over the move clip. */
-function footstepLayers(project, rig, from, to, T, Ns, gain) {
+/** Footsteps for one character walking/running from → to, starting at t0 and lasting `dur` seconds. */
+function footstepLayers(project, rig, from, to, t0, dur, Ns, gain, anim = 'walk') {
   if (!from || !to) return [];
-  const walk = rig?.data.findAnimation('walk');
-  const d = walk ? walk.duration : 1.07;
+  const walk = rig?.data.findAnimation(anim);
+  const d = walk ? walk.duration : anim === 'run' ? 0.6 : 1.07;
   const r = mulberry32(77 + Math.round(from.x) * 7 + Math.round(to.x));
   const L = new Float32Array(Ns);
   const R = new Float32Array(Ns);
-  for (let t = 0.1; t < T; t += d / 2) {
-    const u = t / T;
+  for (let t = t0 + 0.1; t < t0 + dur; t += d / 2) {
+    const u = (t - t0) / dur;
     const x = from.x + (to.x - from.x) * u;
     const p = Math.max(-1, Math.min(1, panOf(x)));
     const ev = noiseBurst(r, 0.09, 0.004, 0.025, [['lowpass', 900], ['highpass', 90]]);
@@ -342,9 +342,10 @@ function actionLayers(project, rig, clip, Ns) {
   if (clip.kind === 'move') {
     for (const c of chars) {
       const mv = clip.moveCast?.[c.id];
-      const moving = mv && mv.from && mv.to && Math.hypot(mv.to.x - mv.from.x, mv.to.y - mv.from.y) > 2;
-      if (moving) {
-        for (const ly of footstepLayers(project, rig, mv.from, mv.to, T, Ns, gain)) out.push(ly);
+      if (mv && mv.T) {
+        // tiếng bước chân chỉ khi đi bộ / chạy; các hành động tuỳ chỉnh khác (nhảy, ngã…) im lặng
+        const anim = mv.action === 'anim:run' ? 'run' : mv.action === 'anim:walk' ? 'walk' : null;
+        if (anim && mv.moving) for (const ly of footstepLayers(project, rig, mv.from, mv.to, mv.delay || 0, mv.T, Ns, gain, anim)) out.push(ly);
       } else {
         // Standing while others walk: keep playing its (upcoming segment) action sound.
         const ce = castEntry(clip.seg, c.id);

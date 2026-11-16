@@ -136,3 +136,10 @@ button.linkish { background: none; border: 0; padding: 0; color: var(--accent2);
 .name-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .name-card code { font-size: 11px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name-card input { width: 100%; text-align: center; }
+.tl-enter { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: flex-end; margin: -2px 0 6px 120px; padding: 4px 0 4px 10px; border-left: 2px dashed var(--line); }
+.tl-enter .field { flex: 0 1 150px; margin: 0; }
+.tl-enter .field:first-child { flex-basis: 170px; }
+.tl-enter-info { align-self: center; }
+/* timeline cao lên khi có nhiều nhân vật / tuỳ chỉnh di chuyển → cuộn bên trong, không ép khung hình */
+.stage-wrap { min-height: 220px; }
+.timeline { flex: 0 1 auto; max-height: 46vh; overflow: auto; }
