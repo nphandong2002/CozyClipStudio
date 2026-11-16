@@ -6,7 +6,7 @@ import { renderPropAudio } from '../engine/audio.js';
 import { windowPoints } from '../engine/scene.js';
 import { useAudition } from './useAudioPreview.js';
 import { askTrim } from './TrimDialog.jsx';
-import { useLibrary, setLibrary, partLabel, addLibraryCharToProject, projectFieldsFromSkin, newLibChar, newSkin } from './library.js';
+import { useLibrary, useArt, setLibrary, partLabel, addLibraryCharToProject, projectFieldsFromSkin, newLibChar, newSkin } from './library.js';
 import { setImageSrc, detectKeyBackground, getVideoElement, getMediaDuration, CHROMA_DEFAULTS, LUMA_DEFAULTS, keyModeOf, trimRange } from '../engine/images.js';
 
 const VIDEO_ERR = 'Không đọc được video (định dạng/codec không hỗ trợ). Hãy dùng MP4 (H.264), WebM hoặc MOV.';
@@ -745,13 +745,14 @@ const PARAM_LABELS = { curtains: 'Có rèm cửa', curtainColor: 'Màu rèm', co
 const short = (n) => n.split('/').pop();
 export function CharacterPanel({ project, update, rig, charSel, setCharSel, openLibrary }) {
   const lib = useLibrary();
+  const art = useArt();
   if (!rig) return <p className="muted">Chưa tải nhân vật Spine.</p>;
   const chars = project.characters || [];
   const sel = chars.find((x) => x.id === charSel) || chars[0];
   const cat = rig.catalog;
   const nameOf = (n) => (lib.labels[n] ? `${lib.labels[n]} (${short(n)})` : short(n));
   const opt = (list, none) => [...(none ? [['', none]] : []), ...list.map((n) => [n, nameOf(n)])];
-  const LOOK_FIELDS = ['skin', 'eyes', 'costume', 'mask', 'rod'];
+  const LOOK_FIELDS = ['skin', 'eyes', 'costume', 'mask', 'rod', 'art'];
   const set = (k, v) =>
     update((p) => {
       const c = p.characters.find((x) => x.id === sel.id);
@@ -777,7 +778,7 @@ export function CharacterPanel({ project, update, rig, charSel, setCharSel, open
   };
   // Electron không hỗ trợ prompt() → dùng tên mặc định, đổi tên sau ở trang Thư viện nhân vật
   const saveToLib = () => {
-    const skin = { ...newSkin(), eyes: sel.eyes || '', costume: sel.costume || '', mask: sel.mask || '', rod: sel.rod || '' };
+    const skin = { ...newSkin(), eyes: sel.eyes || '', costume: sel.costume || '', mask: sel.mask || '', rod: sel.rod || '', art: sel.art || '' };
     const sameBase = libChar && libChar.base === sel.skin;
     if (sameBase && confirm(`Thêm diện mạo hiện tại thành skin mới của "${libChar.name}" trong thư viện?
 (Huỷ = tạo nhân vật mới trong thư viện)`)) {
@@ -888,6 +889,13 @@ export function CharacterPanel({ project, update, rig, charSel, setCharSel, open
           </Field>
           <Field label="Mặt nạ / phụ kiện">
             <Select value={sel.mask} options={opt(cat.masks, 'Không')} onChange={(v) => set('mask', v)} />
+          </Field>
+          <Field label="Bộ hình Spine">
+            <Select
+              value={sel.art || ''}
+              options={[['', 'Không — hình gốc'], ...art.sets.map((s) => [s.id, s.name]), ...(sel.art && !art.sets.some((s) => s.id === sel.art) ? [[sel.art, '(bộ hình không có trên máy này)']] : [])]}
+              onChange={(v) => set('art', v)}
+            />
           </Field>
           <Field label="Cần câu (dùng khi câu cá)">
             <Select value={sel.rod} options={opt(cat.rods)} onChange={(v) => set('rod', v)} />

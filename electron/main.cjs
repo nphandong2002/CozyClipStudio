@@ -192,6 +192,60 @@ ipcMain.handle('library:load', async () => {
   return null;
 });
 
+// Bộ hình Spine (thay ảnh bộ phận nhân vật): cấu hình nhỏ trong spine-art.json,
+// ảnh (bảng hình + mảnh cắt) mỗi ảnh một file trong thư mục spine-art/.
+const artDir = () => path.join(cacheDir(), 'spine-art');
+const artFile = () => path.join(cacheDir(), 'spine-art.json');
+const ART_EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/gif': 'gif' };
+const EXT_MIME = Object.fromEntries(Object.entries(ART_EXT).map(([m, e]) => [e, m]));
+const safeId = (id) => String(id).replace(/[^a-zA-Z0-9_-]/g, '');
+ipcMain.handle('art:saveConfig', async (_e, json) => {
+  fs.mkdirSync(cacheDir(), { recursive: true });
+  const f = artFile();
+  if (fs.existsSync(f)) {
+    try {
+      fs.copyFileSync(f, f + '.prev');
+    } catch (_) {}
+  }
+  fs.writeFileSync(f + '.tmp', json);
+  fs.renameSync(f + '.tmp', f);
+  return true;
+});
+ipcMain.handle('art:saveImage', async (_e, id, dataURL) => {
+  const m = /^data:([^;,]+);base64,/.exec(dataURL || '');
+  if (!m) throw new Error('Ảnh không hợp lệ');
+  fs.mkdirSync(artDir(), { recursive: true });
+  const f = path.join(artDir(), safeId(id) + '.' + (ART_EXT[m[1]] || 'png'));
+  fs.writeFileSync(f + '.tmp', Buffer.from(dataURL.slice(m[0].length), 'base64'));
+  fs.renameSync(f + '.tmp', f);
+  return true;
+});
+ipcMain.handle('art:deleteImage', async (_e, id) => {
+  const dir = artDir();
+  if (!fs.existsSync(dir)) return true;
+  for (const n of fs.readdirSync(dir)) if (n.startsWith(safeId(id) + '.')) fs.rmSync(path.join(dir, n), { force: true });
+  return true;
+});
+ipcMain.handle('art:load', async () => {
+  let config = null;
+  for (const f of [artFile(), artFile() + '.prev']) {
+    try {
+      config = JSON.parse(fs.readFileSync(f, 'utf8'));
+      break;
+    } catch (_) {}
+  }
+  const images = {};
+  const dir = artDir();
+  if (fs.existsSync(dir)) {
+    for (const n of fs.readdirSync(dir)) {
+      const m = /^(.+)\.(png|webp|jpg|gif)$/.exec(n);
+      if (!m) continue;
+      images[m[1]] = `data:${EXT_MIME[m[2]]};base64,` + fs.readFileSync(path.join(dir, n)).toString('base64');
+    }
+  }
+  return { config, images };
+});
+
 // ---------------------------------------------------------------- project
 ipcMain.handle('project:save', async (_e, project, filePath) => {
   let p = filePath;

@@ -11,6 +11,10 @@ import { useHistory } from './ui/useHistory.js';
 import { preloadProject } from './engine/images.js';
 import { uid } from './engine/util.js';
 import { LibraryPage, NamesPage } from './ui/LibraryPages.jsx';
+import { SpinePage } from './ui/SpinePage.jsx';
+import { loadArt } from './engine/artsets.js';
+
+loadArt(); // bộ hình Spine (ảnh thay thế bộ phận) dùng chung cho mọi dự án
 import { addLibraryCharToProject } from './ui/library.js';
 
 const STORE_KEY = 'cozyclip.project.v1';
@@ -28,7 +32,7 @@ export default function App() {
   const { project, update, setProject, undo, redo } = useHistory(loadStored);
   const [rig, setRig] = useState(null);
   const [spineMsg, setSpineMsg] = useState('Đang tải nhân vật…');
-  const [view, setView] = useState('edit'); // 'edit' | 'library' | 'names'
+  const [view, setView] = useState('edit'); // 'edit' | 'library' | 'spine' | 'names'
   const [tab, setTab] = useState('scene');
   const [selection, setSelection] = useState(null); // {kind:'prop'|'anchor', id}
   const [charSel, setCharSel] = useState(null);
@@ -328,6 +332,7 @@ export default function App() {
           {[
             ['edit', '🎬 Dựng clip'],
             ['library', '🐾 Thư viện nhân vật'],
+            ['spine', '🎨 Spine'],
             ['names', '🏷 Đặt tên bộ phận'],
           ].map(([k, l]) => (
             <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>
@@ -349,8 +354,9 @@ export default function App() {
         </button>
       </header>
 
-      {view === 'library' && <LibraryPage rig={rig} onAddToProject={addFromLibrary} goNames={() => setView('names')} />}
+      {view === 'library' && <LibraryPage rig={rig} onAddToProject={addFromLibrary} goNames={() => setView('names')} goSpine={() => setView('spine')} />}
       {view === 'names' && <NamesPage rig={rig} />}
+      {view === 'spine' && <SpinePage rig={rig} />}
       {view === 'edit' && (
       <div className="main">
         <aside className="side">

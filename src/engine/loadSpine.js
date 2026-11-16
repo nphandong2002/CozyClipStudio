@@ -1,10 +1,13 @@
 import { CharacterRig } from './character.js';
 
-async function loadImage(src) {
-  const img = new Image();
-  img.src = src;
-  await img.decode();
-  return img;
+// onload thay vì img.decode(): decode() có thể treo khi cửa sổ đang ẩn / thu nhỏ
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('Không tải được ảnh atlas: ' + String(src).slice(0, 80)));
+    img.src = src;
+  });
 }
 
 /** bundle: { jsonText, atlasText, images: { pageName: dataURL | url } } */

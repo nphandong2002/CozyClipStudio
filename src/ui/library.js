@@ -4,6 +4,10 @@
 import { useSyncExternalStore } from 'react';
 import { ACTIONS } from '../engine/character.js';
 import { uid } from '../engine/util.js';
+import { getArt, subscribeArt } from '../engine/artsets.js';
+
+/** Kho bộ hình Spine (re-render khi thêm / sửa bộ hình). */
+export const useArt = () => useSyncExternalStore(subscribeArt, getArt);
 
 const STORE_KEY = 'cozyclip.library.v1';
 const api = typeof window !== 'undefined' ? window.api : null;
@@ -113,7 +117,7 @@ export function actionOptions(rig, lib = state) {
 
 // ------------------------------------------------------------------ characters
 export function newSkin(name = 'Mặc định') {
-  return { id: uid('sk'), name, eyes: '', costume: '', mask: '', rod: '', action: 'idle' };
+  return { id: uid('sk'), name, eyes: '', costume: '', mask: '', rod: '', art: '', action: 'idle' };
 }
 
 export function newLibChar(base = '') {
@@ -122,7 +126,7 @@ export function newLibChar(base = '') {
 
 /** Look object understood by CharacterRig.setLook. */
 export function skinLook(libChar, skin) {
-  return { skin: libChar?.base, eyes: skin?.eyes || '', costume: skin?.costume || '', mask: skin?.mask || '', rod: skin?.rod || '' };
+  return { skin: libChar?.base, eyes: skin?.eyes || '', costume: skin?.costume || '', mask: skin?.mask || '', rod: skin?.rod || '', art: skin?.art || '' };
 }
 
 /** Fields copied onto a project character when a library skin is applied. */
@@ -133,6 +137,7 @@ export function projectFieldsFromSkin(libChar, skin) {
     costume: skin.costume || '',
     mask: skin.mask || '',
     rod: skin.rod || '',
+    art: skin.art || '',
     lib: { char: libChar.id, skin: skin.id },
   };
 }

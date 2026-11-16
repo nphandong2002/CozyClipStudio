@@ -3,6 +3,7 @@ import { buildPlan, renderFrame } from './scene.js';
 import { renderClipAudio } from './audio.js';
 import { encodeWav, SR } from './dsp.js';
 import { preloadProject, seekMediaForExport, resumeMediaPlayback } from './images.js';
+import { artReady } from './artsets.js';
 
 const AUDIO_EXT = {
   'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
@@ -37,6 +38,7 @@ export async function exportProject({ project, rig, api, outFile, onProgress = (
   const t0 = performance.now();
 
   await preloadProject(project); // uploaded image props + background must be ready before rendering
+  await artReady(); // ảnh của bộ hình Spine phải decode xong, nếu không nhân vật sẽ hiện hình gốc
   await api.exportBegin({ outFile, width, height, fps });
   try {
     if (project.audio?.src && api.bgAudio) {

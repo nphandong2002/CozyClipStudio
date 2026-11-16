@@ -5,6 +5,7 @@ import { Field, Range, Select } from './panels.jsx';
 import { RigPreview, RigThumb } from './RigPreview.jsx';
 import {
   useLibrary,
+  useArt,
   setLibrary,
   partLabel,
   actionLabel,
@@ -44,8 +45,9 @@ export function PartPicker({ value, options, onChange }) {
 const defaultBase = (cat) => (cat.characters.includes('skins/meow') ? 'skins/meow' : cat.characters[0] || '');
 
 // ====================================================================== library
-export function LibraryPage({ rig, onAddToProject, goNames }) {
+export function LibraryPage({ rig, onAddToProject, goNames, goSpine }) {
   const lib = useLibrary();
+  const art = useArt();
   const [selId, setSelId] = useState(null);
   const [skinId, setSkinId] = useState(null);
   const [flip, setFlip] = useState(false);
@@ -191,6 +193,16 @@ export function LibraryPage({ rig, onAddToProject, goNames }) {
             </Field>
             <Field label="Mặt nạ / phụ kiện">
               <PartPicker value={skin.mask} options={parts(cat.masks, 'Không')} onChange={(v) => editSkin('mask', v)} />
+            </Field>
+            <Field label="Bộ hình Spine (thay hình bộ phận)" hint={skin.art && !art.sets.some((s) => s.id === skin.art) ? 'Bộ hình này không còn trên máy → đang dùng hình gốc.' : undefined}>
+              <div className="picker">
+                <Select value={skin.art || ''} options={[['', 'Không — hình gốc'], ...art.sets.map((s) => [s.id, s.name])]} onChange={(v) => editSkin('art', v)} />
+                {goSpine && (
+                  <button title="Mở trang Spine để tạo / sửa bộ hình" onClick={goSpine}>
+                    🎨
+                  </button>
+                )}
+              </div>
             </Field>
             <Field label="Cần câu (hiện khi câu cá)">
               <PartPicker value={skin.rod} options={parts(cat.rods, 'Mặc định')} onChange={(v) => editSkin('rod', v)} />

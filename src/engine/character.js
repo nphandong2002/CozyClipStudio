@@ -1,6 +1,7 @@
 // Spine character: loading, look (skin combination), deterministic posing.
 import * as spine from '@esotericsoftware/spine-canvas';
 import { TAU, mulberry32, roundRect as roundRectPath } from './util.js';
+import { applyArt, artGen, getArtSet } from './artsets.js';
 
 /** Built-in action presets. `seq` = animations played in order inside one cycle. */
 export const ACTIONS = {
@@ -64,17 +65,28 @@ export class CharacterRig {
     const parts = [look.skin || this.catalog.characters[0], look.eyes, look.costume, look.mask];
     const needsRod = action && actionDef(action).needs === 'rod';
     if (needsRod) parts.push(look.rod || this.catalog.rods[0]);
-    const key = parts.filter(Boolean).join('|');
+    // bộ hình Spine (ảnh thay thế) → khoá gồm cả "thế hệ" của kho bộ hình để tự dựng lại khi sửa
+    const art = look.art && getArtSet(look.art) ? look.art + '@' + artGen() : '';
+    const key = parts.filter(Boolean).join('|') + (art ? '#' + art : '');
     if (key === this.lookKey) return;
-    const skin = new spine.Skin('look');
-    const def = this.data.findSkin('default');
-    if (def) skin.addSkin(def);
-    for (const p of parts) {
-      const s = p && this.data.findSkin(p);
-      if (s) skin.addSkin(s);
+    this._skins = this._skins || new Map();
+    let built = this._skins.get(key);
+    if (!built) {
+      const skin = new spine.Skin('look');
+      const def = this.data.findSkin('default');
+      if (def) skin.addSkin(def);
+      for (const p of parts) {
+        const s = p && this.data.findSkin(p);
+        if (s) skin.addSkin(s);
+      }
+      const extras = art ? applyArt(this, skin, look.art) : [];
+      built = { skin, extras };
+      if (this._skins.size > 60) this._skins.clear();
+      this._skins.set(key, built);
     }
-    this.skeleton.setSkin(skin);
+    this.skeleton.setSkin(built.skin);
     this.skeleton.setSlotsToSetupPose();
+    this.extras = built.extras;
     this.lookKey = key;
   }
 
@@ -147,6 +159,8 @@ export class CharacterRig {
         }
       }
     }
+    // phụ kiện gắn thêm của bộ hình luôn hiện ở ô của nó
+    if (this.extras?.length) for (const e of this.extras) sk.slots[e.slotIndex].setAttachment(e.att);
     this.tool = opts.free ? null : def.tool || null;
     sk.updateWorldTransform();
     return applied;

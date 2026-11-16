@@ -64,11 +64,21 @@ function lookBounds(r, look) {
  * Draw one frame of `look` doing `action` at time t (s) into ctx (W×H).
  * frame: 'full' (whole body) or 'head' (zoom on the face, for eyes).
  */
-export function drawLook(ctx, r, { look, action = 'idle', t = 0, frame = 'full', W, H, flip = false }) {
-  const b = lookBounds(r, look);
+export function drawLook(ctx, r, { look, action = 'idle', t = 0, frame = 'full', W, H, flip = false, frameLook = null, afterPose = null }) {
+  const b = lookBounds(r, frameLook || look); // frameLook: khung cố định (không nhảy khi đang chỉnh bộ hình)
   r.setLook(look, action);
-  const L = r.cycleDuration(action);
-  r.pose(action, ((t % L) + L) % L, L, { seed: 7, blink: frame !== 'head' }); // xem mặt → không chớp để thấy rõ mắt
+  if (action === '__setup') {
+    // tư thế gốc trong Spine (chưa áp hành động nào)
+    r.skeleton.setToSetupPose();
+    if (r.extras?.length) for (const e of r.extras) r.skeleton.slots[e.slotIndex].setAttachment(e.att);
+    r.tool = null;
+    afterPose?.(r);
+    r.skeleton.updateWorldTransform();
+  } else {
+    const L = r.cycleDuration(action);
+    r.pose(action, ((t % L) + L) % L, L, { seed: 7, blink: frame !== 'head' }); // xem mặt → không chớp để thấy rõ mắt
+    afterPose?.(r);
+  }
   let s, x, y;
   if (frame === 'head') {
     const h = b.head;
@@ -89,6 +99,7 @@ export function drawLook(ctx, r, { look, action = 'idle', t = 0, frame = 'full',
   }
   if (flip) x = W - x;
   r.draw(ctx, x, y, s, flip);
+  return { x, y, s, flip };
 }
 
 function paintBg(ctx, W, H) {

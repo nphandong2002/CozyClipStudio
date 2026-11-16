@@ -143,3 +143,37 @@ button.linkish { background: none; border: 0; padding: 0; color: var(--accent2);
 /* timeline cao lên khi có nhiều nhân vật / tuỳ chỉnh di chuyển → cuộn bên trong, không ép khung hình */
 .stage-wrap { min-height: 220px; }
 .timeline { flex: 0 1 auto; max-height: 46vh; overflow: auto; }
+
+/* ---------------- trang Spine (bộ hình) */
+.spine-left { width: 480px; }
+.sp-sec { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 10px; }
+.sp-sec h3 { display: flex; align-items: center; gap: 8px; }
+.sp-all { margin-left: auto; font-weight: normal; }
+.sheet-view { position: relative; user-select: none; border-radius: 6px; overflow: hidden; cursor: crosshair; margin-bottom: 6px;
+  background: repeating-conic-gradient(#3a3a40 0% 25%, #2c2c31 0% 50%) 0 0 / 16px 16px; }
+.sheet-img { display: block; width: 100%; height: auto; opacity: 0.92; }
+.sheet-box { position: absolute; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 3px; cursor: pointer; }
+.sheet-box span { position: absolute; top: 0; left: 0; font-size: 9px; line-height: 1; padding: 1px 2px; background: rgba(0, 0, 0, 0.55); color: #ddd; border-radius: 0 0 3px 0; }
+.sheet-box:hover { border-color: #fff; background: rgba(255, 255, 255, 0.12); }
+.sheet-box.used { border-color: #6fcf8a; }
+.sheet-box.on { border: 2px solid var(--accent); background: rgba(255, 179, 71, 0.18); }
+.sheet-drag { position: absolute; border: 1px dashed var(--accent); background: rgba(255, 179, 71, 0.12); pointer-events: none; }
+.sel-pieces { align-items: center; gap: 4px; margin: 6px 0; }
+.piece-img, .att-thumb { flex: none; object-fit: contain; border-radius: 4px; background: repeating-conic-gradient(#3a3a40 0% 25%, #2c2c31 0% 50%) 0 0 / 10px 10px; }
+.piece-img.empty { display: inline-block; border: 1px dashed var(--line); background: none; }
+.hidden-tag { display: inline-flex !important; align-items: center; justify-content: center; font-size: 11px; color: var(--muted); }
+.sp-group { margin-bottom: 6px; }
+.sp-slot { font-size: 12px; color: var(--muted); margin: 6px 0 2px; }
+.sp-part { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+.sp-part:hover, .sp-part.hover { background: rgba(255, 255, 255, 0.05); }
+.sp-part.on { background: #3a3122; outline: 1px solid var(--accent); }
+.sp-part .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.mini { padding: 2px 7px; font-size: 11px; }
+.sp-cut { margin: 6px 0; }
+.sp-cut summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.art-preview { cursor: pointer; }
+.sp-edit { flex: none; background: var(--panel); border-radius: 8px; padding: 10px 12px; }
+.sp-edit-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.sp-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; align-items: center; }
+.lib-preview-head { flex-wrap: wrap; }
+.accent { color: var(--accent); }
