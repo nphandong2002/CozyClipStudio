@@ -322,38 +322,60 @@ function hexToRgb(hex) {
 const rgbToHex = (r, g, b) => '#' + [r, g, b].map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
 
 /**
- * Make pixels close to the key colour transparent, in place (RGBA bytes).
- * Distance is measured in the CbCr chroma plane (brightness-independent, so shadows on the screen
- * key out too) as a fraction of the key colour's own saturation, so neutral greys/whites are never
- * removed while similarity < 1.
+ * Remove a green (or any colour) screen, in place (RGBA bytes).
+ *
+ * Every pixel is treated as a MIX of the foreground and the key colour:
+ *   pixel = a·foreground + (1 − a)·key
+ * The share of key colour is read from the pixel's chroma (CbCr) projected onto the key's chroma,
+ * so neutral / differently coloured content keeps a = 1, the screen gets a = 0, and soft content
+ * (glow, smoke, sparkles, light rays, motion blur) gets its real partial transparency instead of
+ * being cut away. The key is then subtracted back out of the colour ("unmix"), so glows keep their
+ * own colour instead of turning green.
+ *   keySimilarity: how much key share counts as pure background (raises the black point)
+ *   keySmoothness: how gradually alpha ramps up after that (higher = softer, more see-through glow)
+ *   keySpill:      removes the green cast left on the foreground
  */
 export function applyChromaKey(data, opts) {
   const [kr, kg, kb] = hexToRgb(opts.keyColor);
   const kcb = -0.168736 * kr - 0.331264 * kg + 0.5 * kb;
   const kcr = 0.5 * kr - 0.418688 * kg - 0.081312 * kb;
-  const kmag = Math.hypot(kcb, kcr) || 1;
+  const k2 = kcb * kcb + kcr * kcr || 1;
   const sim = Math.max(0, Math.min(1, opts.keySimilarity ?? CHROMA_DEFAULTS.keySimilarity));
-  const smooth = Math.max(0.001, opts.keySmoothness ?? CHROMA_DEFAULTS.keySmoothness);
+  const smooth = Math.max(0, opts.keySmoothness ?? CHROMA_DEFAULTS.keySmoothness);
   const spill = Math.max(0, Math.min(1, opts.keySpill ?? CHROMA_DEFAULTS.keySpill));
+  const lo = sim * 0.4; // key share above (1 − lo) → fully transparent (screen + its noise/unevenness)
+  const span = Math.max(0.02, Math.min(1 - lo, 0.1 + smooth * 5));
   // despill acts on the key's dominant channel (green for a green screen)
   const dom = kg >= kr && kg >= kb ? 1 : kb >= kr ? 2 : 0;
   const o1 = dom === 0 ? 1 : 0;
   const o2 = dom === 2 ? 1 : 2;
-  const thr = sim * kmag;
-  const inv = 1 / (kmag * smooth);
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const cb = -0.168736 * r - 0.331264 * g + 0.5 * b - kcb;
-    const cr = 0.5 * r - 0.418688 * g - 0.081312 * b - kcr;
-    const d = Math.sqrt(cb * cb + cr * cr) - thr; // <= 0 → inside the key
-    if (d <= 0) {
+    let r = data[i];
+    let g = data[i + 1];
+    let b = data[i + 2];
+    const cb = -0.168736 * r - 0.331264 * g + 0.5 * b;
+    const cr = 0.5 * r - 0.418688 * g - 0.081312 * b;
+    const t = (cb * kcb + cr * kcr) / k2; // share of key colour in this pixel (1 = pure screen)
+    const raw = 1 - t; // foreground share
+    if (raw <= lo) {
       data[i + 3] = 0;
       continue;
     }
-    const a = d * inv;
-    if (a < 1) data[i + 3] = data[i + 3] * Math.pow(a, 1.5);
+    if (t > 0) {
+      // unmix: take the key colour back out so soft edges/glows keep their own colour
+      const inv = 1 / raw;
+      r = (r - t * kr) * inv;
+      g = (g - t * kg) * inv;
+      b = (b - t * kb) * inv;
+      r = r < 0 ? 0 : r > 255 ? 255 : r;
+      g = g < 0 ? 0 : g > 255 ? 255 : g;
+      b = b < 0 ? 0 : b > 255 ? 255 : b;
+      const a = (raw - lo) / span;
+      if (a < 1) data[i + 3] = data[i + 3] * a;
+    }
+    data[i] = r;
+    data[i + 1] = g;
+    data[i + 2] = b;
     if (spill > 0) {
       const c = data[i + dom];
       const lim = Math.max(data[i + o1], data[i + o2]);

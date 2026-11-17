@@ -726,7 +726,7 @@ function VideoMediaEditor({ sel, setParams, dur, loopSeconds }) {
           <Field label="Độ nhạy" hint="Cao hơn = xoá rộng hơn (kể cả vùng xanh tối/bóng đổ).">
             <Range value={prm.keySimilarity ?? CHROMA_DEFAULTS.keySimilarity} min={0.05} max={0.95} step={0.01} onChange={(v) => setParams({ keySimilarity: v })} fmt={pct} />
           </Field>
-          <Field label="Độ mềm viền">
+          <Field label="Độ mềm viền" hint="Cao hơn = quầng sáng, khói, lấp lánh mờ giữ được nhiều hơn (trong hơn); thấp hơn = hình đặc, viền gọn.">
             <Range value={prm.keySmoothness ?? CHROMA_DEFAULTS.keySmoothness} min={0.01} max={0.6} step={0.01} onChange={(v) => setParams({ keySmoothness: v })} fmt={pct} />
           </Field>
           <Field label="Khử ánh xanh ở viền">
