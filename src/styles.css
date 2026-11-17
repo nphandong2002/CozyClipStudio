@@ -177,3 +177,8 @@ button.mini { padding: 2px 7px; font-size: 11px; }
 .sp-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; align-items: center; }
 .lib-preview-head { flex-wrap: wrap; }
 .accent { color: var(--accent); }
+
+/* ---------------- mask editing */
+.stage-wrap { position: relative; }
+.mask-hint { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 5px 10px; border-radius: 6px; background: rgba(20, 18, 24, 0.82); color: #ffd166; font-size: 12px; pointer-events: none; }
+.warn { color: #f0b35a; }

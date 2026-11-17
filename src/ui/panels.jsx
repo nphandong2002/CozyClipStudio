@@ -1,6 +1,7 @@
 import React from 'react';
 import { PROPS } from '../engine/props.js';
 import { TIMES, WEATHERS } from '../engine/world.js';
+import { maskActive, rectMask, ellipseMask, MASK_DEFAULTS } from '../engine/mask.js';
 import { uid } from '../engine/util.js';
 import { renderPropAudio } from '../engine/audio.js';
 import { windowPoints } from '../engine/scene.js';
@@ -597,6 +598,7 @@ export function PropsPanel({ project, update, selection, setSelection }) {
             </div>
           )}
           {isVideo && <VideoMediaEditor sel={sel} setParams={setParams} dur={vidDur} loopSeconds={project.output.loopSeconds} />}
+          {sel.type === 'image' && sel.params?.src && <MaskEditor sel={sel} setParams={setParams} selection={selection} setSelection={setSelection} />}
           <div className="row">
             <Field label="X">
               <input type="number" value={sel.x} onChange={(e) => setP('x', +e.target.value)} />
@@ -678,6 +680,80 @@ export function PropsPanel({ project, update, selection, setSelection }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Mask (khoanh vùng) của vật thể ảnh / GIF / video — vẽ & sửa điểm neo trên khung hình. */
+function MaskEditor({ sel, setParams, selection, setSelection }) {
+  const m = sel.params?.mask;
+  const editing = selection?.kind === 'prop' && selection.id === sel.id && !!selection.mask;
+  const setEditing = (on) => setSelection({ kind: 'prop', id: sel.id, ...(on ? { mask: true } : {}) });
+  const setMask = (obj) => setParams({ mask: { ...MASK_DEFAULTS, ...(m || {}), ...obj } });
+  const start = (preset) => {
+    setParams({ mask: preset || { ...MASK_DEFAULTS, points: [] } });
+    setEditing(true);
+  };
+  const n = m?.points?.length || 0;
+  return (
+    <>
+      <h3>Mask (khoanh vùng)</h3>
+      {!m ? (
+        <>
+          <small className="muted block" style={{ marginBottom: 6 }}>
+            Chỉ giữ lại phần hình bên trong đường viền bạn vẽ — giống Mask Path trong Premiere Pro.
+          </small>
+          <div className="row">
+            <button onClick={() => start(null)}>✏️ Vẽ mask</button>
+            <button onClick={() => start(rectMask())}>▭ Chữ nhật</button>
+            <button onClick={() => start(ellipseMask())}>◯ Elip</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="row">
+            <button className={editing ? 'primary' : ''} onClick={() => setEditing(!editing)}>
+              {editing ? '✓ Xong sửa mask' : '✏️ Sửa mask trên khung hình'}
+            </button>
+            <label className="check">
+              <input type="checkbox" checked={m.enabled !== false} onChange={(e) => setMask({ enabled: e.target.checked })} /> Bật
+            </label>
+          </div>
+          {editing && (
+            <small className="muted block">
+              Bấm chỗ trống để thêm điểm, bấm lên viền để chèn điểm, kéo điểm để di chuyển, bấm đúp điểm để đổi cong ↔ nhọn, chuột phải (hoặc Alt+bấm) để xoá điểm, kéo bên trong để dời cả mask. Esc = xong.
+            </small>
+          )}
+          {n < 3 && <small className="warn block">Cần ít nhất 3 điểm thì mask mới có tác dụng ({n}/3).</small>}
+          <Field label="Độ mềm biên">
+            <Range value={m.feather || 0} min={0} max={150} step={1} onChange={(v) => setMask({ feather: v })} fmt={(v) => v + ' px'} />
+          </Field>
+          <Field label="Mở rộng / thu hẹp">
+            <Range value={m.expand || 0} min={-150} max={150} step={1} onChange={(v) => setMask({ expand: v })} fmt={(v) => (v > 0 ? '+' : '') + v + ' px'} />
+          </Field>
+          <label className="check">
+            <input type="checkbox" checked={!!m.invert} onChange={(e) => setMask({ invert: e.target.checked })} /> Đảo ngược (giữ phần bên ngoài)
+          </label>
+          <div className="row">
+            <button onClick={() => setMask({ points: m.points.map((q) => ({ ...q, smooth: true })) })} disabled={!n}>
+              Làm cong hết
+            </button>
+            <button onClick={() => setMask({ points: m.points.map((q) => ({ ...q, smooth: false })) })} disabled={!n}>
+              Góc nhọn hết
+            </button>
+            <button
+              className="danger"
+              onClick={() => {
+                setParams({ mask: undefined });
+                setEditing(false);
+              }}
+            >
+              Xoá mask
+            </button>
+          </div>
+          {maskActive(m) ? null : n >= 3 && <small className="muted block">Mask đang tắt.</small>}
+        </>
+      )}
+    </>
   );
 }
 

@@ -4,6 +4,7 @@
 import { TAU, mulberry32, osc, pnoise, frac, cyclesFor, mix, rgba, roundRect, clamp, lerp } from './util.js';
 import { drawSky, drawPrecip, lightningFlash } from './world.js';
 import { getDrawable } from './images.js';
+import { maskActive, drawMasked } from './mask.js';
 
 // ---------------------------------------------------------------- flames
 function flame(ctx, env, w, h, seed, intensity = 1) {
@@ -1145,7 +1146,9 @@ export const PROPS = {
       const d = getDrawable('prop:' + p.id, env.t, p.params);
       if (d) {
         try {
-          ctx.drawImage(d, -w / 2, -h, w, h);
+          // mask (khoanh vùng) — chỉ giữ phần trong đường viền người dùng vẽ
+          if (maskActive(p.params?.mask)) drawMasked(ctx, d, p.params.mask, w, h, p.id);
+          else ctx.drawImage(d, -w / 2, -h, w, h);
         } catch (_) {}
       } else {
         // placeholder while the image loads (or if it failed)

@@ -287,6 +287,11 @@ export default function App() {
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
+    // đang sửa mask: Esc = xong; Delete / mũi tên không đụng tới vật thể
+    if (selection?.mask) {
+      if (e.key === 'Escape') return e.preventDefault(), setSelection({ kind: 'prop', id: selection.id });
+      if (e.key === 'Delete' || e.key === 'Backspace' || e.key.startsWith('Arrow')) return;
+    }
     if (mod && k === 'z') return e.preventDefault(), e.shiftKey ? redo() : undo();
     if (mod && k === 'y') return e.preventDefault(), redo();
     if (mod && k === 's') return e.preventDefault(), save(false);
