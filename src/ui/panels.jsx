@@ -227,6 +227,46 @@ const pct = (v) => Math.round(v * 100) + '%';
 export function ScenePanel({ project, update, presets, selection, setSelection }) {
   const s = project.scene;
   const set = (k, v) => update((p) => (p.scene[k] = v));
+  // ---- nền: ảnh / GIF / video (dùng chung bộ tải của vật thể: tiến độ, chuyển đổi MOV, cắt đoạn)
+  const [bgUpload, setBgUpload] = React.useState(null);
+  const bgBusy = bgUpload && !bgUpload.error;
+  const bgKind = s.backgroundImage ? s.backgroundMedia || 'image' : null;
+  const pickBackground = () =>
+    pickFile(
+      MEDIA_ACCEPT,
+      (file) => {
+        const old = { src: s.backgroundImage, media: s.backgroundMedia || 'image' };
+        setBgUpload({ name: file.name, label: 'Đang đọc file', progress: 0 });
+        loadMediaFile(file, 'bg', (st) => setBgUpload({ name: file.name, ...st }))
+          .then(({ src, mediaType, extra }) => {
+            update((p) => {
+              p.scene.backgroundImage = src;
+              p.scene.backgroundMedia = mediaType;
+              if (mediaType === 'video') p.scene.backgroundParams = { duration: extra.duration || 0, trimStart: 0, trimEnd: null };
+              else delete p.scene.backgroundParams;
+            });
+            setBgUpload(null);
+          })
+          .catch((e) => {
+            setImageSrc('bg', old.src || null, old.media); // trả lại nền cũ
+            setBgUpload({ name: file.name, error: e?.message || String(e) });
+          });
+      },
+      true
+    );
+  const clearBackground = () =>
+    update((p) => {
+      p.scene.backgroundImage = '';
+      delete p.scene.backgroundMedia;
+      delete p.scene.backgroundParams;
+    });
+  const bgDur = bgKind === 'video' ? s.backgroundParams?.duration || getMediaDuration('bg') : 0;
+  const [, bgTick] = React.useState(0);
+  React.useEffect(() => {
+    if (bgKind !== 'video' || bgDur) return;
+    const t = setInterval(() => bgTick((x) => x + 1), 400); // dự án cũ chưa lưu độ dài → chờ video tải
+    return () => clearInterval(t);
+  }, [bgKind, bgDur]);
   const selWin = selection?.kind === 'window' ? (s.windows || []).find((w) => w.id === selection.id) : null;
   const winSize = (w) => {
     const pts = windowPoints(w);
@@ -280,7 +320,7 @@ export function ScenePanel({ project, update, presets, selection, setSelection }
         <Select value={s.weather} options={Object.entries(WEATHERS)} onChange={(v) => set('weather', v)} />
       </Field>
       {s.backgroundImage ? (
-        <p className="muted small">Đang dùng ảnh nền — màu tường/sàn & đường sàn bị ẩn (ảnh thay thế bối cảnh vẽ bằng code).</p>
+        <p className="muted small">Đang dùng {bgKind === 'video' ? 'video' : bgKind === 'gif' ? 'GIF' : 'ảnh'} nền — màu tường/sàn & đường sàn bị ẩn (nền này thay thế bối cảnh vẽ bằng code).</p>
       ) : (
         <>
           {s.type === 'indoor' ? (
@@ -306,17 +346,30 @@ export function ScenePanel({ project, update, presets, selection, setSelection }
         <Range value={s.vignette ?? 0.45} min={0} max={0.9} step={0.05} onChange={(v) => set('vignette', v)} fmt={pct} />
       </Field>
 
-      <h3>Ảnh nền</h3>
-      <Field label="Ảnh nền toàn cảnh" hint="Thay nền vẽ bằng code. Nhân vật & vật thể vẫn vẽ đè lên; thời tiết/ánh sáng vẫn hoạt động.">
+      <h3>Ảnh / video nền</h3>
+      <Field label="Nền toàn cảnh" hint="Ảnh, GIF hoặc video (MP4, WebM, MOV…) thay nền vẽ bằng code. Video nền lặp liên tục, tắt tiếng. Nhân vật & vật thể vẫn vẽ đè lên; thời tiết/ánh sáng vẫn hoạt động.">
         <div className="row">
-          <button onClick={() => pickFile('image/*', (f, d) => set('backgroundImage', d))}>{s.backgroundImage ? 'Đổi ảnh nền' : '⬆ Tải ảnh nền'}</button>
+          <button onClick={pickBackground} disabled={bgBusy}>
+            {s.backgroundImage ? 'Đổi nền' : '⬆ Tải ảnh / video nền'}
+          </button>
           {s.backgroundImage && (
-            <button className="danger" onClick={() => set('backgroundImage', '')}>
-              Bỏ ảnh nền
+            <button className="danger" onClick={clearBackground} disabled={bgBusy}>
+              Bỏ nền
             </button>
           )}
         </div>
       </Field>
+      <UploadStatus state={bgUpload} onClose={() => setBgUpload(null)} />
+      {bgKind === 'video' && (
+        <VideoMediaEditor
+          sel={{ id: 'bg', params: s.backgroundParams || {} }}
+          mediaKey="bg"
+          keying={false}
+          dur={bgDur}
+          loopSeconds={project.output.loopSeconds}
+          setParams={(obj) => update((p) => (p.scene.backgroundParams = { ...(p.scene.backgroundParams || {}), ...obj }))}
+        />
+      )}
       <h3>Cửa sổ động (trời / thời tiết)</h3>
       <p className="muted small">Khoanh một vùng để vẽ bầu trời + mưa/tuyết/sấm động vào đó — đặt chồng lên ô cửa trong ảnh nền để nó "sống". Kéo 4 góc để tạo hình bất kỳ (nghiêng/méo/to nhỏ); kéo trong lòng để di chuyển.</p>
       <button onClick={addWindow}>+ Thêm vùng cửa sổ</button>
@@ -629,9 +682,9 @@ export function PropsPanel({ project, update, selection, setSelection }) {
 }
 
 /** Video object: segment trim + green-screen removal (both apply to preview and export). */
-function VideoMediaEditor({ sel, setParams, dur, loopSeconds }) {
+function VideoMediaEditor({ sel, setParams, dur, loopSeconds, mediaKey, keying = true }) {
   const prm = sel.params || {};
-  const key = 'prop:' + sel.id;
+  const key = mediaKey || 'prop:' + sel.id;
   const { start, end } = trimRange(prm, dur);
   const len = end - start;
   const L = loopSeconds || 0;
@@ -686,6 +739,8 @@ function VideoMediaEditor({ sel, setParams, dur, loopSeconds }) {
       ) : (
         <small className="muted">Đang tải video…</small>
       )}
+      {keying && (
+      <>
       <h3>Xoá nền video</h3>
       <Field label="Loại nền">
         <div className="row" style={{ margin: 0 }}>
@@ -734,6 +789,8 @@ function VideoMediaEditor({ sel, setParams, dur, loopSeconds }) {
           </Field>
           <button onClick={() => setParams({ ...CHROMA_DEFAULTS, keyColor: prm.keyColor || CHROMA_DEFAULTS.keyColor })}>Đặt lại thông số</button>
         </>
+      )}
+      </>
       )}
     </>
   );

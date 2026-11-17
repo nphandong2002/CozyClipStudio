@@ -2,7 +2,7 @@
 import { DESIGN_W, DESIGN_H, effectiveScene, lerp, smooth, hashStr } from './util.js';
 import { drawIndoorBackground, drawOutdoorBackground, drawPrecip, drawLighting, drawDust, drawVignette } from './world.js';
 import { drawProp, propLights, drawWindowQuad } from './props.js';
-import { getImage } from './images.js';
+import { getDrawable, backgroundParams } from './images.js';
 
 export const WALK_SPEED = 170; // design px per second at character scale 1.6
 
@@ -20,7 +20,8 @@ export function renderFrame(ctx, project, rig, state) {
   ctx.globalCompositeOperation = 'source-over';
   ctx.filter = 'none';
 
-  const bgImg = project.scene.backgroundImage ? getImage('bg') : null;
+  // ảnh / GIF / video nền (video được tua đúng thời điểm khi xuất)
+  const bgImg = project.scene.backgroundImage ? getDrawable('bg', env.t, backgroundParams(project.scene)) : null;
   if (bgImg) {
     drawBackground(ctx, bgImg, DESIGN_W, DESIGN_H);
     if (!indoor) drawPrecip(ctx, 0, 0, DESIGN_W, DESIGN_H, env, { scale: 0.6, density: 0.8, seed: 5 });
@@ -75,8 +76,8 @@ function mod(a, b) {
  * Cover scale is rotation-aware so the frame never shows gaps when tilted.
  */
 export function drawBackground(ctx, img, W, H, frame) {
-  const iw = img.naturalWidth || img.width;
-  const ih = img.naturalHeight || img.height;
+  const iw = img.videoWidth || img.naturalWidth || img.width;
+  const ih = img.videoHeight || img.naturalHeight || img.height;
   if (!iw || !ih) return;
   const f = frame || {};
   const zoom = f.zoom || 1;

@@ -187,7 +187,8 @@ function mediaTypeOf(p) {
 export function preloadProject(project) {
   if (!project) return Promise.resolve();
   const ps = [];
-  if (project.scene?.backgroundImage) ps.push(setImageSrc('bg', project.scene.backgroundImage, 'image'));
+  // nền: ảnh tĩnh, GIF hoặc video (scene.backgroundMedia)
+  if (project.scene?.backgroundImage) ps.push(setImageSrc('bg', project.scene.backgroundImage, project.scene.backgroundMedia || 'image'));
   else {
     disposeRecord(cache.get('bg'));
     cache.delete('bg');
@@ -208,16 +209,26 @@ export function preloadProject(project) {
   return Promise.all(ps);
 }
 
-/** Before exporting a frame at loop time t, seek every video prop to the matching time. */
+/** Trim / playback params of the background video (scene.backgroundParams). */
+export const backgroundParams = (scene) => ({ ...(scene?.backgroundParams || {}), keyMode: 'none' });
+
+/** [key, params] of every video the project draws: video props + a video background. */
+function projectVideos(project) {
+  const out = [];
+  if (project.scene?.backgroundImage && project.scene.backgroundMedia === 'video') out.push(['bg', backgroundParams(project.scene)]);
+  for (const p of project.props || []) if (p.type === 'image' && mediaTypeOf(p) === 'video') out.push(['prop:' + p.id, p.params]);
+  return out;
+}
+
+/** Before exporting a frame at loop time t, seek every video (props + background) to the matching time. */
 export async function seekMediaForExport(project, t) {
   const tasks = [];
-  for (const p of project.props || []) {
-    if (p.type !== 'image' || mediaTypeOf(p) !== 'video') continue;
-    const rec = cache.get('prop:' + p.id);
+  for (const [key, params] of projectVideos(project)) {
+    const rec = cache.get(key);
     if (!rec || rec.kind !== 'video' || !rec.ready) continue;
     const v = rec.video;
     if (!v.paused) v.pause();
-    const { start, end } = trimRange(p.params, rec.duration || v.duration || 0);
+    const { start, end } = trimRange(params, rec.duration || v.duration || 0);
     const len = end - start;
     // stay a hair before `end` so the decoded frame is still inside the segment
     const target = len > 0 ? Math.min(end - 1e-3, start + (((t % len) + len) % len)) : start;
