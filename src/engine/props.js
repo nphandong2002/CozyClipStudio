@@ -147,6 +147,164 @@ export function drawWindowQuad(ctx, points, env, seed = 8, opts = {}) {
 }
 
 // ------------------------------------------------------------- registry
+// ---------------------------------------------------------------- cây thông Noel (đèn nhấp nháy)
+// Mọi nhịp nháy dùng osc / frac với số chu kỳ nguyên trong vòng lặp L → lặp liền mạch,
+// xem trước và xuất video giống hệt nhau.
+export const BLINK_MODES = [
+  ['twinkle', 'Lấp lánh ngẫu nhiên'],
+  ['chase', 'Chạy đuổi theo dây'],
+  ['flash', 'Chớp tắt xen kẽ'],
+  ['steady', 'Sáng dịu (thở nhẹ)'],
+];
+
+/** Brightness 0..1 of bulb i (of n) at env.t. */
+function bulbLevel(env, mode, speed, i, n, seed) {
+  const r = mulberry32(seed * 7919 + i * 104729);
+  const sp = Math.max(0.1, speed || 1);
+  if (mode === 'chase') {
+    const f = frac(env, cyclesFor(0.45 * sp, env.L), -(i / Math.max(1, n)) * 4);
+    const w = Math.max(0, Math.cos(f * TAU));
+    return 0.18 + 0.82 * w * w * w;
+  }
+  if (mode === 'flash') {
+    const s = osc(env, 0.7 * sp, i % 2 ? Math.PI : 0);
+    return 0.12 + 0.88 * clamp(0.5 + s * 2.5, 0, 1);
+  }
+  if (mode === 'steady') return 0.82 + 0.18 * osc(env, 0.18 * sp, r() * TAU);
+  // twinkle: mỗi bóng một nhịp riêng, thỉnh thoảng loé sáng
+  const v = 0.5 + 0.5 * osc(env, (0.35 + r() * 0.9) * sp, r() * TAU);
+  const spark = Math.max(0, osc(env, (0.9 + r() * 1.3) * sp, r() * TAU));
+  return clamp(0.22 + 0.6 * v * v + 0.5 * Math.pow(spark, 12), 0, 1);
+}
+
+function bulb(ctx, x, y, color, b, size = 6) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const R = size * (2.2 + 2.6 * b);
+  const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+  g.addColorStop(0, rgba(color, 0.55 * b));
+  g.addColorStop(0.4, rgba(color, 0.22 * b));
+  g.addColorStop(1, rgba(color, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(x - R, y - R, R * 2, R * 2);
+  ctx.restore();
+  ctx.fillStyle = mix(mix(color, '#000000', 0.55), mix(color, '#ffffff', 0.55), b);
+  ctx.beginPath();
+  ctx.arc(x, y, size, 0, TAU);
+  ctx.fill();
+  if (b > 0.5) {
+    ctx.fillStyle = rgba('#ffffff', (b - 0.5) * 1.6);
+    ctx.beginPath();
+    ctx.arc(x - size * 0.3, y - size * 0.3, size * 0.4, 0, TAU);
+    ctx.fill();
+  }
+}
+
+/** One tier of needles: triangle with a scalloped bottom edge. */
+function tier(ctx, topY, baseY, halfW, dark, light, scallops = 7) {
+  const g = ctx.createLinearGradient(-halfW, 0, halfW, 0);
+  g.addColorStop(0, dark);
+  g.addColorStop(0.55, light);
+  g.addColorStop(1, dark);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(0, topY);
+  ctx.lineTo(halfW, baseY - 6);
+  const step = (halfW * 2) / scallops;
+  for (let k = 0; k < scallops; k++) {
+    const x0 = halfW - k * step;
+    ctx.quadraticCurveTo(x0 - step / 2, baseY + 14, x0 - step, baseY - 6);
+  }
+  ctx.closePath();
+  ctx.fill();
+  // nét lá kim
+  ctx.strokeStyle = rgba(dark, 0.55);
+  ctx.lineWidth = 2;
+  for (let k = 1; k < 6; k++) {
+    const t = k / 6;
+    ctx.beginPath();
+    ctx.moveTo(0, topY + (baseY - topY) * t * 0.6);
+    ctx.lineTo(halfW * (t * 0.9), baseY - 10);
+    ctx.moveTo(0, topY + (baseY - topY) * t * 0.6);
+    ctx.lineTo(-halfW * (t * 0.9), baseY - 10);
+    ctx.stroke();
+  }
+}
+
+function star(ctx, x, y, R, color, glow) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const G = R * (2.4 + glow * 1.6);
+  const g = ctx.createRadialGradient(x, y, 0, x, y, G);
+  g.addColorStop(0, rgba(color, 0.55 * glow));
+  g.addColorStop(1, rgba(color, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(x - G, y - G, G * 2, G * 2);
+  ctx.restore();
+  ctx.fillStyle = mix(color, '#ffffff', 0.25 * glow);
+  ctx.strokeStyle = mix(color, '#7a5200', 0.6);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let k = 0; k < 10; k++) {
+    const a = -Math.PI / 2 + (k * Math.PI) / 5;
+    const rr = k % 2 ? R * 0.45 : R;
+    ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+function gift(ctx, x, w, h, color, ribbon) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x - w / 2, -h, w, h);
+  ctx.fillStyle = rgba('#000000', 0.15);
+  ctx.fillRect(x + w * 0.15, -h, w * 0.35, h);
+  ctx.fillStyle = ribbon;
+  ctx.fillRect(x - 5, -h, 10, h);
+  ctx.fillRect(x - w / 2, -h * 0.55, w, 8);
+  ctx.beginPath();
+  ctx.ellipse(x - 11, -h - 6, 12, 7, -0.5, 0, TAU);
+  ctx.ellipse(x + 11, -h - 6, 12, 7, 0.5, 0, TAU);
+  ctx.fill();
+}
+
+/** Points along a sagging string from (x0,y0) to (x1,y1). */
+function stringPts(x0, y0, x1, y1, sag, n) {
+  const pts = [];
+  for (let k = 0; k <= n; k++) {
+    const t = k / n;
+    pts.push({ x: lerp(x0, x1, t), y: lerp(y0, y1, t) + Math.sin(t * Math.PI) * sag });
+  }
+  return pts;
+}
+function wire(ctx, pts, color = 'rgba(30,40,30,0.7)', width = 2) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  pts.forEach((q, k) => (k ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+  ctx.stroke();
+}
+
+const CLASSIC_COLORS = ['#ff3b3b', '#ffd23b', '#3b8bff', '#3bff7a', '#ff6bd6', '#ff9a2e'];
+
+function hsl(h, s, l) {
+  // → hex (cho rgba/mix)
+  h = ((h % 360) + 360) % 360;
+  s /= 100;
+  l /= 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return '#' + [f(0), f(8), f(4)].map((x) => Math.round(x * 255).toString(16).padStart(2, '0')).join('');
+}
+
+/** Each bulb also lifts the night darkness around itself, so it glows like a real light. */
+function bulbLights(bs) {
+  return bs.filter((q) => q.b > 0.15).map((q) => ({ x: q.x, y: q.y, r: q.size * 7, intensity: 0.95 * q.b, glow: 0.55 * q.b, color: q.color }));
+}
+
+
 export const PROPS = {
   fireplace: {
     label: 'Lò sưởi',
@@ -1130,6 +1288,257 @@ export const PROPS = {
           ctx.fill();
         }
       }
+    },
+  },
+
+  xmasTree: {
+    label: 'Cây thông Noel cổ điển (đèn màu)',
+    layer: 'back',
+    w: 400,
+    h: 640,
+    params: { blink: 'twinkle', speed: 1, star: true, gifts: true },
+    /** Bulbs in local space: { x, y, color, b (0..1), size }. Shared by draw + light. */
+    bulbs(p, env) {
+      const prm = p.params || {};
+      const lines = [
+        [-165, -170, 165, -140, 30, 11],
+        [-130, -280, 130, -255, 24, 9],
+        [-98, -380, 98, -360, 20, 7],
+        [-64, -468, 64, -455, 14, 5],
+      ];
+      const pts = lines.flatMap(([x0, y0, x1, y1, sag, n]) => stringPts(x0, y0, x1, y1, sag, n));
+      return pts.map((q, i) => ({ ...q, color: CLASSIC_COLORS[i % CLASSIC_COLORS.length], b: bulbLevel(env, prm.blink || 'twinkle', prm.speed, i, pts.length, 11), size: 6 }));
+    },
+    draw(ctx, p, env) {
+      const prm = p.params || {};
+      // chậu + thân
+      ctx.fillStyle = '#5a3a24';
+      ctx.fillRect(-16, -112, 32, 50);
+      ctx.fillStyle = '#a8322d';
+      ctx.beginPath();
+      ctx.moveTo(-62, -74);
+      ctx.lineTo(62, -74);
+      ctx.lineTo(48, 0);
+      ctx.lineTo(-48, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#d4a63a';
+      ctx.fillRect(-66, -82, 132, 12);
+      // 4 tầng lá
+      for (const [top, base, hw] of [
+        [-300, -96, 185],
+        [-390, -210, 150],
+        [-475, -315, 115],
+        [-560, -410, 78],
+      ])
+        tier(ctx, top, base, hw, '#1d4a2b', '#3f8a4a');
+      // dây kim tuyến vàng
+      ctx.lineCap = 'round';
+      for (const [x0, y0, x1, y1, sag] of [
+        [-150, -150, 150, -118, 26],
+        [-118, -262, 118, -236, 22],
+        [-88, -365, 88, -345, 18],
+        [-58, -455, 58, -440, 14],
+      ])
+        wire(ctx, stringPts(x0, y0, x1, y1, sag, 20), 'rgba(240,200,80,0.9)', 5);
+      // châu trang trí
+      const r = mulberry32(11);
+      const balls = ['#c8282c', '#e8b730', '#2c66c8', '#c8282c', '#e8e8f0'];
+      for (let i = 0; i < 16; i++) {
+        const tt = r();
+        const y = -120 - tt * 420;
+        const half = 170 * (1 - tt * 0.85);
+        const x = (r() - 0.5) * half * 1.6;
+        const c = balls[i % balls.length];
+        const g = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, 10);
+        g.addColorStop(0, mix(c, '#ffffff', 0.6));
+        g.addColorStop(1, c);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, TAU);
+        ctx.fill();
+      }
+      // dây đèn + bóng đèn
+      const bs = this.bulbs(p, env);
+      for (let k = 0, i = 0; k < 4; k++) {
+        const n = [12, 10, 8, 6][k];
+        wire(ctx, bs.slice(i, i + n));
+        i += n;
+      }
+      for (const q of bs) bulb(ctx, q.x, q.y, q.color, q.b, q.size);
+      if (prm.star !== false) star(ctx, 0, -572, 30, '#ffd23b', 0.6 + 0.4 * (0.5 + 0.5 * osc(env, 0.4 * (prm.speed || 1))));
+      if (prm.gifts !== false) {
+        gift(ctx, -118, 70, 56, '#c8282c', '#f0d070');
+        gift(ctx, 112, 60, 48, '#2c7a4a', '#e8e8f0');
+        gift(ctx, 70, 44, 34, '#2c66c8', '#ffd23b');
+      }
+    },
+    light(p, env) {
+      const bs = this.bulbs(p, env);
+      const avg = bs.reduce((s, q) => s + q.b, 0) / bs.length;
+      return [
+        { x: 0, y: -330, r: 620, intensity: 0.22 + 0.25 * avg, glow: 0.35, color: '#ffb070' },
+        ...(p.params?.star !== false ? [{ x: 0, y: -572, r: 120, intensity: 0.9, glow: 0.5, color: '#ffd23b' }] : []),
+        ...bulbLights(bs),
+      ];
+    },
+  },
+
+  xmasTreeSnow: {
+    label: 'Cây thông phủ tuyết (đèn trắng ấm)',
+    layer: 'back',
+    w: 340,
+    h: 660,
+    params: { blink: 'chase', speed: 1, star: true, lightColor: '#ffe2a0' },
+    // dây đèn xoắn ốc quanh tán; chỉ những bóng ở mặt trước mới hiện
+    spiral() {
+      const pts = [];
+      const N = 54;
+      for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        const y = -112 - t * 460;
+        const half = 150 * (1 - t) + 6; // bám theo bóng tán cây
+        const a = t * TAU * 3.5;
+        pts.push({ x: Math.sin(a) * half * 0.9, y: y + Math.cos(a) * 8, front: Math.cos(a) > -0.15, i });
+      }
+      return pts;
+    },
+    bulbs(p, env) {
+      const prm = p.params || {};
+      const sp = this.spiral();
+      return sp.filter((q) => q.front).map((q) => ({ x: q.x, y: q.y, color: prm.lightColor || '#ffe2a0', b: bulbLevel(env, prm.blink || 'chase', prm.speed, q.i, sp.length, 23), size: 4.5 }));
+    },
+    draw(ctx, p, env) {
+      const prm = p.params || {};
+      // thùng gỗ
+      ctx.fillStyle = '#7a5434';
+      ctx.fillRect(-56, -70, 112, 70);
+      ctx.strokeStyle = '#5a3a22';
+      ctx.lineWidth = 3;
+      for (const y of [-52, -30, -10]) {
+        ctx.beginPath();
+        ctx.moveTo(-56, y);
+        ctx.lineTo(56, y);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#4a3020';
+      ctx.fillRect(-12, -100, 24, 34);
+      // 5 tầng lá mảnh + tuyết phủ
+      for (const [top, base, hw] of [
+        [-270, -90, 160],
+        [-360, -190, 132],
+        [-440, -285, 104],
+        [-515, -375, 76],
+        [-600, -460, 46],
+      ]) {
+        tier(ctx, top, base, hw, '#173b2c', '#2f6b4c', 6);
+        ctx.fillStyle = 'rgba(244,249,255,0.95)';
+        ctx.beginPath();
+        const step = (hw * 2) / 6;
+        ctx.moveTo(hw, base - 6);
+        for (let k = 0; k < 6; k++) {
+          const x0 = hw - k * step;
+          ctx.quadraticCurveTo(x0 - step / 2, base + 12, x0 - step, base - 6);
+        }
+        for (let k = 6; k > 0; k--) {
+          const x0 = -hw + (6 - k) * step;
+          ctx.quadraticCurveTo(x0 + step / 2, base - 2, x0 + step, base - 14);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(0, top + 6);
+        ctx.quadraticCurveTo(hw * 0.25, top + (base - top) * 0.3, hw * 0.12, top + (base - top) * 0.45);
+        ctx.quadraticCurveTo(-hw * 0.1, top + (base - top) * 0.3, 0, top + 6);
+        ctx.fill();
+      }
+      // dây đèn: chỉ vẽ đoạn ở mặt trước
+      const sp = this.spiral();
+      ctx.strokeStyle = 'rgba(25,35,30,0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 1; i < sp.length; i++) {
+        if (!sp[i].front || !sp[i - 1].front) continue;
+        ctx.moveTo(sp[i - 1].x, sp[i - 1].y);
+        ctx.lineTo(sp[i].x, sp[i].y);
+      }
+      ctx.stroke();
+      for (const q of this.bulbs(p, env)) bulb(ctx, q.x, q.y, q.color, q.b, q.size);
+      if (prm.star !== false) star(ctx, 0, -610, 24, '#e8eef8', 0.55 + 0.45 * (0.5 + 0.5 * osc(env, 0.35 * (prm.speed || 1))));
+    },
+    light(p, env) {
+      const bs = this.bulbs(p, env);
+      const avg = bs.reduce((s, q) => s + q.b, 0) / bs.length;
+      return [
+        { x: 0, y: -340, r: 560, intensity: 0.2 + 0.25 * avg, glow: 0.35, color: p.params?.lightColor || '#ffe2a0' },
+        ...(p.params?.star !== false ? [{ x: 0, y: -610, r: 100, intensity: 0.85, glow: 0.45, color: '#e8eef8' }] : []),
+        ...bulbLights(bs),
+      ];
+    },
+  },
+
+  xmasTreeMini: {
+    label: 'Cây thông mini để bàn (đèn 7 màu)',
+    layer: 'front',
+    w: 170,
+    h: 260,
+    params: { blink: 'twinkle', speed: 1, star: true },
+    bulbs(p, env) {
+      const prm = p.params || {};
+      // màu trôi theo thời gian (số vòng nguyên trong vòng lặp → lặp liền mạch)
+      const hueShift = 360 * frac(env, cyclesFor(0.12 * (prm.speed || 1), env.L));
+      const r = mulberry32(37);
+      const n = 22;
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const tt = (i + 0.5) / n;
+        const y = -72 - tt * 145 + (r() - 0.5) * 8;
+        const half = 62 * (1 - tt * 0.9);
+        const x = (r() - 0.5) * 2 * half * 0.85;
+        out.push({ x, y, color: hsl(i * 52 + hueShift, 95, 60), b: bulbLevel(env, prm.blink || 'twinkle', prm.speed, i, n, 37), size: 3.5 });
+      }
+      return out;
+    },
+    draw(ctx, p, env) {
+      const prm = p.params || {};
+      // chậu sứ trắng
+      ctx.fillStyle = '#f2ece2';
+      ctx.beginPath();
+      ctx.moveTo(-40, -46);
+      ctx.lineTo(40, -46);
+      ctx.lineTo(30, 0);
+      ctx.lineTo(-30, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#c94a4a';
+      ctx.fillRect(-42, -50, 84, 8);
+      ctx.fillStyle = '#5a3a24';
+      ctx.fillRect(-6, -66, 12, 18);
+      // 3 tầng lá xếp chồng
+      for (const [top, base, hw] of [
+        [-170, -58, 72],
+        [-205, -110, 54],
+        [-240, -160, 36],
+      ])
+        tier(ctx, top, base, hw, '#1f5233', '#4a9a58', 5);
+      for (const q of this.bulbs(p, env)) bulb(ctx, q.x, q.y, q.color, q.b, q.size);
+      if (prm.star !== false) {
+        // nơ đỏ trên đỉnh
+        ctx.fillStyle = '#d23a3a';
+        ctx.beginPath();
+        ctx.ellipse(-10, -244, 11, 7, -0.5, 0, TAU);
+        ctx.ellipse(10, -244, 11, 7, 0.5, 0, TAU);
+        ctx.fill();
+        ctx.fillStyle = '#a82424';
+        ctx.beginPath();
+        ctx.arc(0, -244, 5, 0, TAU);
+        ctx.fill();
+      }
+    },
+    light(p, env) {
+      const bs = this.bulbs(p, env);
+      const avg = bs.reduce((s, q) => s + q.b, 0) / bs.length;
+      return [{ x: 0, y: -140, r: 300, intensity: 0.18 + 0.2 * avg, glow: 0.3, color: bs[0].color }, ...bulbLights(bs)];
     },
   },
 

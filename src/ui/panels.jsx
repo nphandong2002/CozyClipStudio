@@ -1,5 +1,5 @@
 import React from 'react';
-import { PROPS, propBounds } from '../engine/props.js';
+import { PROPS, propBounds, BLINK_MODES } from '../engine/props.js';
 import { TIMES, WEATHERS } from '../engine/world.js';
 import { maskActive, rectMask, ellipseMask, MASK_DEFAULTS } from '../engine/mask.js';
 import { uid } from '../engine/util.js';
@@ -634,6 +634,14 @@ export function PropsPanel({ project, update, selection, setSelection }) {
                 <Field label="Kiểu" key={k}>
                   <Select value={v} options={[['open', 'Sách mở (lật trang)'], ['stack', 'Chồng sách']]} onChange={(x) => setParam(k, x)} />
                 </Field>
+              ) : k === 'blink' ? (
+                <Field label={PARAM_LABELS[k] || k} key={k}>
+                  <Select value={v} options={BLINK_MODES} onChange={(x) => setParam(k, x)} />
+                </Field>
+              ) : typeof v === 'number' ? (
+                <Field label={PARAM_LABELS[k] || k} key={k}>
+                  <Range value={v} min={0.25} max={3} step={0.05} onChange={(x) => setParam(k, x)} fmt={(x) => x.toFixed(2) + '×'} />
+                </Field>
               ) : (
                 <Field label={PARAM_LABELS[k] || k} key={k}>
                   <input type="color" value={v} onChange={(e) => setParam(k, e.target.value)} />
@@ -956,7 +964,7 @@ function VideoMediaEditor({ sel, setParams, dur, loopSeconds, mediaKey, keying =
   );
 }
 
-const PARAM_LABELS = { curtains: 'Có rèm cửa', curtainColor: 'Màu rèm', color: 'Màu', glow: 'Đèn sáng bên trong' };
+const PARAM_LABELS = { curtains: 'Có rèm cửa', curtainColor: 'Màu rèm', color: 'Màu', glow: 'Đèn sáng bên trong', blink: 'Kiểu nhấp nháy', speed: 'Tốc độ nháy', star: 'Ngôi sao / nơ trên đỉnh', gifts: 'Hộp quà dưới gốc', lightColor: 'Màu đèn' };
 
 // -------------------------------------------------------------- character
 const short = (n) => n.split('/').pop();
