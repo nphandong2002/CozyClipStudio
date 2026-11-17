@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cozyRoomPreset, campingPreset, migrateProject } from './engine/presets.js';
 import { loadRigFromBundle, loadSampleBundle } from './engine/loadSpine.js';
-import { buildPlan, fmtDuration, windowPoints } from './engine/scene.js';
+import { buildPlan, fmtDuration, windowPoints, renderFrame } from './engine/scene.js';
 import Stage from './ui/Stage.jsx';
 import Timeline from './ui/Timeline.jsx';
 import { ScenePanel, PropsPanel, CharacterPanel } from './ui/panels.jsx';
 import ExportDialog from './ui/ExportDialog.jsx';
+import SnapshotDialog from './ui/SnapshotDialog.jsx';
 import { useAudioPreview, useBackgroundAudio, useAuditionSolo } from './ui/useAudioPreview.js';
 import { useHistory } from './ui/useHistory.js';
-import { preloadProject } from './engine/images.js';
+import { preloadProject, seekMediaForExport, resumeMediaPlayback } from './engine/images.js';
 import { uid } from './engine/util.js';
 import { LibraryPage, NamesPage } from './ui/LibraryPages.jsx';
 import { SpinePage } from './ui/SpinePage.jsx';
@@ -41,6 +42,7 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [showGuides, setShowGuides] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
+  const [snapshot, setSnapshot] = useState(null); // { canvas, name, info } — khung hình vừa chụp
   const [filePath, setFilePath] = useState(null);
   const [previewMove, setPreviewMove] = useState(false);
   const clock = useRef({ start: performance.now(), pausedAt: 0 });
@@ -146,6 +148,39 @@ export default function App() {
   }, [project]);
 
   const onMoveDone = useCallback(() => setPreviewMove(false), []);
+
+  // 📷 Chụp đúng khung hình đang xem (đúng thời điểm, độ phân giải xuất, không có khung chỉnh) — như Export Frame của Premiere
+  const captureFrame = async () => {
+    const clip = activeClip;
+    if (!clip) return;
+    const c = clock.current;
+    const tNow = playing ? (performance.now() - c.start) / 1000 : c.pausedAt || 0;
+    if (playing) setPlaying(false); // dừng lại ở đúng khung vừa chụp
+    const L = project.output.loopSeconds;
+    const state =
+      clip.kind === 'move'
+        ? { t: Math.min(tNow, clip.T), L, seg: clip.seg, phase: clip.phase, move: { moveCast: clip.moveCast, u: Math.min(1, tNow / clip.T), T: clip.T } }
+        : { t: tNow % L, L, seg: clip.seg, phase: clip.phase };
+    const { width, height } = project.output;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    try {
+      await preloadProject(project);
+      await seekMediaForExport(project, (((state.t + (clip.phase || 0)) % L) + L) % L); // video: đúng khung như khi xuất
+      renderFrame(canvas.getContext('2d'), project, rig, state);
+    } finally {
+      resumeMediaPlayback();
+    }
+    const tc = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}-${(s % 60).toFixed(2).padStart(5, '0').replace('.', '-')}`;
+    const where = clip.kind === 'move' ? 'di-chuyen' : 'PC' + (project.timeline.indexOf(clip.seg) + 1);
+    const safe = (project.name || 'khung-hinh').replace(/[\\/:*?"<>|]+/g, '_');
+    setSnapshot({
+      canvas,
+      name: `${safe}_${where}_${tc(state.t)}`,
+      info: `${clip.kind === 'move' ? 'đoạn di chuyển' : 'phân cảnh ' + (project.timeline.indexOf(clip.seg) + 1)} · giây ${state.t.toFixed(2)}`,
+    });
+  };
 
   const save = async (as) => {
     if (!api) {
@@ -295,6 +330,7 @@ export default function App() {
     if (mod && k === 'z') return e.preventDefault(), e.shiftKey ? redo() : undo();
     if (mod && k === 'y') return e.preventDefault(), redo();
     if (mod && k === 's') return e.preventDefault(), save(false);
+    if (mod && e.shiftKey && k === 'e') return e.preventDefault(), captureFrame(); // như Premiere: Ctrl+Shift+E
     if (mod && k === 'c') return copySel();
     if (mod && k === 'v') {
       if (clipboard.current) {
@@ -414,6 +450,9 @@ export default function App() {
           <div className="transport">
             <button onClick={() => setPlaying((v) => !v)}>{playing ? '❚❚ Dừng' : '▶ Phát'}</button>
             <button onClick={() => setMuted((v) => !v)}>{muted ? '🔇 Bật tiếng' : '🔊 Tắt tiếng'}</button>
+            <button onClick={captureFrame} disabled={!activeClip} title="Chụp khung hình đang xem ra ảnh PNG/JPG (Ctrl+Shift+E)">
+              📷 Chụp khung hình
+            </button>
             <button disabled={moveClip?.kind !== 'move'} onClick={() => setPreviewMove(true)}>
               ↪ Xem đoạn di chuyển
             </button>
@@ -424,7 +463,7 @@ export default function App() {
               Đang xem: {activeClip?.kind === 'move' ? 'di chuyển' : `phân cảnh ${project.timeline.indexOf(seg) + 1}`} · vòng lặp {project.output.loopSeconds}s · kéo thả vật thể / điểm neo trên khung hình
             </span>
             <span className="muted small kbd-hint">
-              Phím tắt: <b>Delete</b> xoá · <b>Ctrl+Z/Y</b> hoàn tác/làm lại · <b>Ctrl+C/V</b> chép/dán · <b>Ctrl+D</b> nhân bản · <b>mũi tên</b> dịch (giữ Shift = 10px) · <b>Ctrl+S</b> lưu
+              Phím tắt: <b>Delete</b> xoá · <b>Ctrl+Z/Y</b> hoàn tác/làm lại · <b>Ctrl+C/V</b> chép/dán · <b>Ctrl+D</b> nhân bản · <b>mũi tên</b> dịch (giữ Shift = 10px) · <b>Ctrl+S</b> lưu · <b>Ctrl+Shift+E</b> chụp khung hình
             </span>
           </div>
           <Timeline project={project} update={update} plan={plan} segIndex={segIndex} setSegIndex={setSegIndex} rig={rig} />
@@ -433,6 +472,7 @@ export default function App() {
       )}
 
       {exportOpen && <ExportDialog project={project} rig={rig} api={api} onClose={() => setExportOpen(false)} />}
+      {snapshot && <SnapshotDialog canvas={snapshot.canvas} defaultName={snapshot.name} info={snapshot.info} api={api} onClose={() => setSnapshot(null)} />}
     </div>
   );
 }

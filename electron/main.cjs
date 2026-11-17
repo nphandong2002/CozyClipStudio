@@ -302,3 +302,23 @@ ipcMain.handle('media:probe', async (_e, p) => {
   }
 });
 ipcMain.handle('shell:show', async (_e, p) => shell.showItemInFolder(p));
+ipcMain.handle('shell:open', async (_e, p) => shell.openPath(p));
+
+// ---------------------------------------------------------------- chụp khung hình (Export Frame)
+ipcMain.handle('frame:defaultDir', async () => app.getPath('pictures'));
+ipcMain.handle('frame:pickDir', async (_e, current) => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Chọn thư mục lưu ảnh',
+    defaultPath: current && fs.existsSync(current) ? current : app.getPath('pictures'),
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+});
+ipcMain.handle('frame:save', async (_e, dir, name, ext, bytes) => {
+  if (!dir || !fs.existsSync(dir)) throw new Error('Thư mục lưu không tồn tại: ' + dir);
+  const base = String(name || 'khung-hinh').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'khung-hinh';
+  let f = path.join(dir, base + '.' + ext);
+  for (let k = 1; fs.existsSync(f); k++) f = path.join(dir, `${base}_${k}.${ext}`); // không ghi đè ảnh cũ
+  fs.writeFileSync(f, Buffer.from(bytes));
+  return f;
+});

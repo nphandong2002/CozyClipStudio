@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('api', {
   finalize: (clips) => ipcRenderer.invoke('export:finalize', clips),
   cancelExport: () => ipcRenderer.invoke('export:cancel'),
   showInFolder: (p) => ipcRenderer.invoke('shell:show', p),
+  openPath: (p) => ipcRenderer.invoke('shell:open', p),
+  defaultFrameDir: () => ipcRenderer.invoke('frame:defaultDir'),
+  pickFrameDir: (current) => ipcRenderer.invoke('frame:pickDir', current),
+  saveFrame: (dir, name, ext, bytes) => ipcRenderer.invoke('frame:save', dir, name, ext, bytes),
   // convert a picked video File (by its path on disk, or its bytes) into a playable video
   // duration (s) of a picked video, read by ffmpeg from its path on disk; null if unknown
   probeVideoFile: async (file) => {
