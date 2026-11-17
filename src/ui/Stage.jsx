@@ -134,6 +134,14 @@ export default function Stage({ project, rig, clip, playing, clock, showGuides, 
   const winById = (id) => (project.scene.windows || []).find((w) => w.id === id);
 
   const cursorFor = (pt) => {
+    if (selection?.kind === 'prop') {
+      const o = project.props.find((x) => x.id === selection.id);
+      if (o) {
+        const b = propBounds(o);
+        const ci = cornerAt(pt, [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }], 18);
+        if (ci >= 0) return ci % 2 === 0 ? 'nwse-resize' : 'nesw-resize';
+      }
+    }
     if (selection?.kind === 'window') {
       const w = winById(selection.id);
       if (w) {
@@ -245,6 +253,22 @@ export default function Stage({ project, rig, clip, playing, clock, showGuides, 
       maskDown(e, pt);
       return;
     }
+    // góc của vật thể đang chọn → kéo để phóng to / thu nhỏ
+    if (selection?.kind === 'prop') {
+      const o = project.props.find((x) => x.id === selection.id);
+      if (o && o.enabled !== false) {
+        const b = propBounds(o);
+        const corners = [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }];
+        if (cornerAt(pt, corners, 18) >= 0) {
+          const c = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+          drag.current = { scaleProp: true, id: o.id, c, d0: Math.max(1, Math.hypot(pt.x - c.x, pt.y - c.y)), s0: o.scale || 1, h1: b.h / (o.scale || 1), media: o.type === 'image' };
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch (_) {}
+          return;
+        }
+      }
+    }
     // a corner of the currently selected window?
     if (selection?.kind === 'window') {
       const w = winById(selection.id);
@@ -257,7 +281,10 @@ export default function Stage({ project, rig, clip, playing, clock, showGuides, 
         }
       }
     }
-    const hit = hitTest(pt);
+    // bấm trong vật thể đang chọn → luôn kéo chính nó (dù có vật khác chồng lên)
+    const cur = selection?.kind === 'prop' ? project.props.find((x) => x.id === selection.id && x.enabled !== false) : null;
+    const cb = cur && propBounds(cur);
+    const hit = cb && pt.x >= cb.x && pt.x <= cb.x + cb.w && pt.y >= cb.y && pt.y <= cb.y + cb.h ? { kind: 'prop', id: cur.id } : hitTest(pt);
     setSelection(hit);
     if (!hit) return;
     if (hit.kind === 'window') {
@@ -278,6 +305,17 @@ export default function Stage({ project, rig, clip, playing, clock, showGuides, 
       return;
     }
     if (drag.current.maskPoint || drag.current.maskMove) return maskMove(pt);
+    if (drag.current.scaleProp) {
+      const { id, c, d0, s0, h1, media } = drag.current;
+      const ns = Math.max(0.01, Math.min(20, Math.round(s0 * (Math.hypot(pt.x - c.x, pt.y - c.y) / d0) * 1000) / 1000));
+      update((p) => {
+        const o = p.props.find((x) => x.id === id);
+        if (!o) return;
+        o.scale = ns;
+        if (media) o.y = Math.round((c.y + (h1 * ns) / 2) * 10) / 10; // ảnh: phóng quanh tâm
+      }, 'drag');
+      return;
+    }
     if (drag.current.winCorner) {
       const { id, ci } = drag.current;
       editWindowPoints(id, (pts) => (pts[ci] = { x: Math.round(pt.x), y: Math.round(pt.y) }));
@@ -394,7 +432,15 @@ function drawGuides(ctx, project, rig, clip, selection) {
     ctx.strokeStyle = '#ffd166';
     ctx.strokeRect(b.x, b.y, b.w, b.h);
     ctx.fillStyle = '#ffd166';
-    ctx.fillText(PROPS[p.type]?.label || p.type, b.x + 4, b.y - 8);
+    ctx.fillText(`${PROPS[p.type]?.label || p.type} · ${Math.round((p.scale || 1) * 100)}%`, b.x + 4, b.y - 8);
+    // 4 tay nắm góc để phóng to / thu nhỏ
+    for (const [hx, hy] of [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.h], [b.x, b.y + b.h]]) {
+      ctx.fillStyle = '#ffd166';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.fillRect(hx - 9, hy - 9, 18, 18);
+      ctx.strokeRect(hx - 9, hy - 9, 18, 18);
+    }
   }
   // live-window regions: free 4-corner quads with draggable corner handles
   for (const w of project.scene.windows || []) {

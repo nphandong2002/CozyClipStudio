@@ -184,3 +184,6 @@ button.mini { padding: 2px 7px; font-size: 11px; }
 .warn { color: #f0b35a; }
 .snap-preview { width: 100%; height: auto; border-radius: 6px; display: block; margin-bottom: 4px; background: #000; }
 .modal.snapshot { width: 520px; }
+.num-input { display: flex; align-items: center; gap: 4px; }
+.num-input input { width: 100%; min-width: 0; }
+.motion-btns { flex-wrap: wrap; gap: 6px; margin-top: 6px; }

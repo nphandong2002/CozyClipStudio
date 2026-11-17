@@ -1,5 +1,5 @@
 import React from 'react';
-import { PROPS } from '../engine/props.js';
+import { PROPS, propBounds } from '../engine/props.js';
 import { TIMES, WEATHERS } from '../engine/world.js';
 import { maskActive, rectMask, ellipseMask, MASK_DEFAULTS } from '../engine/mask.js';
 import { uid } from '../engine/util.js';
@@ -599,17 +599,7 @@ export function PropsPanel({ project, update, selection, setSelection }) {
           )}
           {isVideo && <VideoMediaEditor sel={sel} setParams={setParams} dur={vidDur} loopSeconds={project.output.loopSeconds} />}
           {sel.type === 'image' && sel.params?.src && <MaskEditor sel={sel} setParams={setParams} selection={selection} setSelection={setSelection} />}
-          <div className="row">
-            <Field label="X">
-              <input type="number" value={sel.x} onChange={(e) => setP('x', +e.target.value)} />
-            </Field>
-            <Field label="Y (chân)">
-              <input type="number" value={sel.y} onChange={(e) => setP('y', +e.target.value)} />
-            </Field>
-          </div>
-          <Field label="Kích thước">
-            <Range value={sel.scale ?? 1} min={0.2} max={3} step={0.05} onChange={(v) => setP('scale', v)} fmt={(v) => v.toFixed(2) + '×'} />
-          </Field>
+          <MotionEditor sel={sel} update={update} />
           <Field label="Lớp" hint="Tiền cảnh = vẽ trước nhân vật, tạo chiều sâu">
             <Select value={sel.layer || 'back'} options={[['back', 'Nền (sau nhân vật)'], ['front', 'Tiền cảnh (trước nhân vật)']]} onChange={(v) => setP('layer', v)} />
           </Field>
@@ -680,6 +670,100 @@ export function PropsPanel({ project, update, selection, setSelection }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- chuyển động (như bảng Motion của Premiere)
+const FRAME_W = 1920;
+const FRAME_H = 1080;
+/** Size of the object at scale 1 (design px). */
+function baseSize(p) {
+  const b = propBounds({ ...p, scale: 1 });
+  return { w: b.w, h: b.h };
+}
+
+/** Number input that lets you type freely and only commits valid numbers. */
+function NumInput({ value, onChange, step = 1, suffix }) {
+  const [txt, setTxt] = React.useState(null);
+  return (
+    <div className="num-input">
+      <input
+        type="number"
+        step={step}
+        value={txt ?? value}
+        onChange={(e) => {
+          setTxt(e.target.value);
+          const v = parseFloat(e.target.value);
+          if (isFinite(v)) onChange(v);
+        }}
+        onBlur={() => setTxt(null)}
+      />
+      {suffix && <span className="muted">{suffix}</span>}
+    </div>
+  );
+}
+
+/**
+ * Position X / Y + Scale of an object, both ways in sync with dragging on the stage.
+ * Ảnh / GIF / video: vị trí = TÂM khung hình (giống Premiere). Vật thể vẽ sẵn: vị trí = điểm chân.
+ */
+function MotionEditor({ sel, update }) {
+  const media = sel.type === 'image';
+  const s = sel.scale ?? 1;
+  const { w, h } = baseSize(sel);
+  const cy = media ? sel.y - (h * s) / 2 : sel.y; // y hiển thị
+  const edit = (fn) =>
+    update((p) => {
+      const o = p.props.find((x) => x.id === sel.id);
+      if (o) fn(o);
+    }, 'motion');
+  const setScale = (ns, o) => {
+    ns = Math.max(0.01, Math.min(20, ns));
+    if (media) o.y = Math.round((o.y - (h * (o.scale ?? 1)) / 2 + (h * ns) / 2) * 10) / 10; // giữ nguyên tâm
+    o.scale = Math.round(ns * 10000) / 10000;
+  };
+  // Vừa khung / phủ kín: ảnh nằm giữa khung hình 1920×1080
+  const fit = (cover) =>
+    edit((o) => {
+      const k = cover ? Math.max(FRAME_W / w, FRAME_H / h) : Math.min(FRAME_W / w, FRAME_H / h);
+      o.scale = Math.round(k * 10000) / 10000;
+      o.x = FRAME_W / 2;
+      o.y = media ? FRAME_H / 2 + (h * o.scale) / 2 : FRAME_H / 2 + (h * o.scale) / 2;
+    });
+  const center = () =>
+    edit((o) => {
+      o.x = FRAME_W / 2;
+      o.y = FRAME_H / 2 + (h * (o.scale ?? 1)) / 2;
+    });
+  return (
+    <>
+      <h3>Chuyển động</h3>
+      <div className="row">
+        <Field label="Vị trí X">
+          <NumInput value={Math.round(sel.x * 10) / 10} onChange={(v) => edit((o) => (o.x = v))} />
+        </Field>
+        <Field label={media ? 'Vị trí Y' : 'Y (chân)'}>
+          <NumInput value={Math.round(cy * 10) / 10} onChange={(v) => edit((o) => (o.y = media ? v + (h * (o.scale ?? 1)) / 2 : v))} />
+        </Field>
+        <Field label="Tỉ lệ">
+          <NumInput value={Math.round(s * 1000) / 10} step={1} suffix="%" onChange={(v) => edit((o) => setScale(v / 100, o))} />
+        </Field>
+      </div>
+      <Range value={Math.min(400, Math.max(5, s * 100))} min={5} max={400} step={1} onChange={(v) => edit((o) => setScale(v / 100, o))} fmt={(v) => Math.round(s * 100) + '%'} />
+      <div className="row motion-btns">
+        <button onClick={() => fit(false)} title="Phóng / thu cho cả hình nằm vừa trong khung 1920×1080, đặt giữa">
+          ⤢ Vừa khung
+        </button>
+        <button onClick={() => fit(true)} title="Phóng cho hình phủ kín cả khung (có thể bị cắt mép)">
+          ⬛ Phủ kín
+        </button>
+        <button onClick={center}>✛ Căn giữa</button>
+        <button onClick={() => edit((o) => setScale(1, o))}>100%</button>
+      </div>
+      <small className="muted block">
+        {media ? 'Vị trí tính theo tâm hình. ' : ''}Kéo vật thể trên khung để di chuyển, kéo 4 góc để phóng to / thu nhỏ — thông số tự cập nhật.
+      </small>
+    </>
   );
 }
 
