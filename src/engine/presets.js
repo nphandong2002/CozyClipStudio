@@ -65,6 +65,24 @@ export function campingPreset() {
   };
 }
 
+/** Empty scene (no objects, one character) to start a project from scratch. */
+export function blankPreset(kind = 'indoor') {
+  const indoor = kind !== 'outdoor';
+  return migrateProject({
+    version: 3,
+    name: 'Dự án mới',
+    output: { width: 1920, height: 1080, fps: 30, loopSeconds: 30 },
+    spineDir: '',
+    characters: [{ id: 'c1', name: 'Nhân vật 1', skin: 'skins/meow', eyes: '', costume: '', mask: '', rod: 'rods/rod1', scale: 0.6, facesLeft: false }],
+    scene: indoor
+      ? { type: 'indoor', timeOfDay: 'night', weather: 'clear', wallColor: '#c99a76', floorColor: '#7a4e33', floorLevel: 0.74, vignette: 0.45 }
+      : { type: 'outdoor', timeOfDay: 'day', weather: 'clear', groundColor: '#6e9a4f', floorLevel: 0.72, vignette: 0.4 },
+    mix: { master: 0.9, weather: 1, props: 1, character: 1 },
+    props: [],
+    timeline: [{ id: 's1', minutes: 10, cast: { c1: { action: 'sit', x: 960, y: indoor ? 980 : 960 } } }],
+  });
+}
+
 /**
  * Upgrade an older project to the current shape:
  *  - single character  → characters[]

@@ -7,6 +7,7 @@ import Timeline from './ui/Timeline.jsx';
 import { ScenePanel, PropsPanel, CharacterPanel } from './ui/panels.jsx';
 import ExportDialog from './ui/ExportDialog.jsx';
 import SnapshotDialog from './ui/SnapshotDialog.jsx';
+import NewProjectDialog from './ui/NewProjectDialog.jsx';
 import { useAudioPreview, useBackgroundAudio, useAuditionSolo } from './ui/useAudioPreview.js';
 import { useHistory } from './ui/useHistory.js';
 import { preloadProject, seekMediaForExport, resumeMediaPlayback } from './engine/images.js';
@@ -42,6 +43,7 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [showGuides, setShowGuides] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
+  const [newOpen, setNewOpen] = useState(false); // hộp thoại Dự án mới
   const [snapshot, setSnapshot] = useState(null); // { canvas, name, info } — khung hình vừa chụp
   const [filePath, setFilePath] = useState(null);
   const [previewMove, setPreviewMove] = useState(false);
@@ -189,10 +191,11 @@ export default function App() {
       a.href = URL.createObjectURL(blob);
       a.download = (project.name || 'du-an') + '.cozy.json';
       a.click();
-      return;
+      return a.download;
     }
     const p = await api.saveProject(project, as ? null : filePath);
     if (p) setFilePath(p);
+    return p;
   };
   const open = async () => {
     let r = null;
@@ -223,13 +226,18 @@ export default function App() {
       setSegIndex(0);
     }
   };
-  const loadPreset = (fn) => {
-    if (!confirm('Thay dự án hiện tại bằng mẫu này?')) return;
-    const p = fn();
+  // Bắt đầu một dự án khác: giữ thư mục Spine, QUÊN đường dẫn file cũ để lần "Lưu" đầu tiên hỏi tên mới
+  const startProject = (p) => {
     p.spineDir = project.spineDir;
     setProject(p);
+    setFilePath(null);
     setSegIndex(0);
     setSelection(null);
+    setPreviewMove(false);
+  };
+  const loadPreset = (fn) => {
+    if (!confirm('Thay dự án hiện tại bằng mẫu này?\n(Đây là dự án MỚI: lần Lưu đầu tiên sẽ hỏi tên file, không ghi đè file đang mở.)')) return;
+    startProject(fn());
   };
 
   // Thêm một nhân vật (với skin đã chọn) từ thư viện vào dự án đang mở
@@ -330,6 +338,7 @@ export default function App() {
     if (mod && k === 'z') return e.preventDefault(), e.shiftKey ? redo() : undo();
     if (mod && k === 'y') return e.preventDefault(), redo();
     if (mod && k === 's') return e.preventDefault(), save(false);
+    if (mod && e.altKey && k === 'n') return e.preventDefault(), setNewOpen(true);
     if (mod && e.shiftKey && k === 'e') return e.preventDefault(), captureFrame(); // như Premiere: Ctrl+Shift+E
     if (mod && k === 'c') return copySel();
     if (mod && k === 'v') {
@@ -387,6 +396,9 @@ export default function App() {
         <button onClick={pickSpine}>Thư mục Spine</button>
         <button title="Hoàn tác (Ctrl+Z)" onClick={undo}>↶</button>
         <button title="Làm lại (Ctrl+Y)" onClick={redo}>↷</button>
+        <button onClick={() => setNewOpen(true)} title="Tạo dự án mới (Ctrl+Alt+N)">
+          📄 Mới
+        </button>
         <button onClick={open}>Mở</button>
         <button onClick={() => save(false)}>Lưu</button>
         <button onClick={() => save(true)}>Lưu thành…</button>
@@ -472,6 +484,19 @@ export default function App() {
       )}
 
       {exportOpen && <ExportDialog project={project} rig={rig} api={api} onClose={() => setExportOpen(false)} />}
+      {newOpen && (
+        <NewProjectDialog
+          currentName={project.name}
+          hasFile={!!filePath}
+          onSaveCurrent={() => save(false)}
+          onCreate={(p) => {
+            startProject(p);
+            setNewOpen(false);
+            setView('edit');
+          }}
+          onClose={() => setNewOpen(false)}
+        />
+      )}
       {snapshot && <SnapshotDialog canvas={snapshot.canvas} defaultName={snapshot.name} info={snapshot.info} api={api} onClose={() => setSnapshot(null)} />}
     </div>
   );

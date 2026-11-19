@@ -187,3 +187,11 @@ button.mini { padding: 2px 7px; font-size: 11px; }
 .num-input { display: flex; align-items: center; gap: 4px; }
 .num-input input { width: 100%; min-width: 0; }
 .motion-btns { flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+/* ---------------- dự án mới */
+.modal.new-project { width: 520px; }
+.np-save { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 8px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); margin-bottom: 10px; }
+.np-starts { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.np-start { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.np-start.on { border-color: var(--accent); background: #3a3122; }
+.np-start input { margin-top: 3px; }
